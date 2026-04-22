@@ -5,7 +5,8 @@ import type { ReformType } from '@/lib/reform';
 interface Props {
   type: ReformType;
   param: number;
-  onChange: (type: ReformType, param: number) => void;
+  phaseInYears: number;
+  onChange: (type: ReformType, param: number, phaseInYears: number) => void;
 }
 
 const REFORM_OPTIONS: {
@@ -35,7 +36,7 @@ const REFORM_OPTIONS: {
   },
 ];
 
-export default function ReformBuilder({ type, param, onChange }: Props) {
+export default function ReformBuilder({ type, param, phaseInYears, onChange }: Props) {
   return (
     <section className="bg-gray-50 rounded-xl p-6 md:p-8 border border-gray-200 shadow-sm">
       <h2 className="text-xl font-bold text-gray-900 mb-6">Reform scenario</h2>
@@ -58,7 +59,7 @@ export default function ReformBuilder({ type, param, onChange }: Props) {
                   name="reform-type"
                   value={opt.id}
                   checked={selected}
-                  onChange={() => onChange(opt.id, defaultParamFor(opt.id))}
+                  onChange={() => onChange(opt.id, defaultParamFor(opt.id), 1)}
                   className="mt-1 h-4 w-4 border-gray-300 text-primary-500 focus:ring-primary-500"
                 />
                 <div className="flex-1">
@@ -70,16 +71,22 @@ export default function ReformBuilder({ type, param, onChange }: Props) {
                   </span>
 
                   {selected && opt.id === 'proportional' && (
-                    <ProportionalSlider
-                      value={param}
-                      onChange={(v) => onChange('proportional', v)}
-                    />
+                    <>
+                      <ProportionalSlider
+                        value={param}
+                        onChange={(v) => onChange('proportional', v, phaseInYears)}
+                      />
+                      <PhaseInInput
+                        value={phaseInYears}
+                        onChange={(y) => onChange('proportional', param, y)}
+                      />
+                    </>
                   )}
 
                   {selected && opt.id === 'top_cap' && (
                     <TopCapInput
                       value={param}
-                      onChange={(v) => onChange('top_cap', v)}
+                      onChange={(v) => onChange('top_cap', v, 1)}
                     />
                   )}
                 </div>
@@ -126,6 +133,40 @@ function ProportionalSlider({
         <span>50%</span>
         <span>100%</span>
       </div>
+    </div>
+  );
+}
+
+function PhaseInInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (years: number) => void;
+}) {
+  return (
+    <div className="mt-4">
+      <label className="block text-xs font-medium text-gray-600 mb-1.5">
+        Phase-in period: <span className="font-semibold text-gray-900">{value} {value === 1 ? 'year' : 'years'}</span>
+      </label>
+      <input
+        type="range"
+        min={1}
+        max={10}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-primary-500"
+        aria-label="Phase-in period in years"
+      />
+      <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+        <span>1 yr (immediate)</span>
+        <span>5 yrs</span>
+        <span>10 yrs</span>
+      </div>
+      <p className="text-[11px] text-gray-500 mt-1">
+        The rate reduction is applied linearly: e.g. a 100% cut over 5 years reduces each rate by 20% per year until fully eliminated in year 5.
+      </p>
     </div>
   );
 }

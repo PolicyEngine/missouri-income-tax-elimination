@@ -104,6 +104,7 @@ function ReformImpactTab() {
   // Reform builder state.
   const [reformType, setReformType] = useState<ReformType>('proportional');
   const [reformParam, setReformParam] = useState(0.5);
+  const [phaseInYears, setPhaseInYears] = useState(1);
 
   // Submission state.
   const [triggered, setTriggered] = useState(false);
@@ -169,8 +170,8 @@ function ReformImpactTab() {
   };
 
   const currentReform = useMemo(
-    () => buildReform(reformType, reformParam),
-    [reformType, reformParam],
+    () => buildReform(reformType, reformParam, phaseInYears),
+    [reformType, reformParam, phaseInYears],
   );
 
   const buildRequest = (): HouseholdRequest => ({
@@ -185,7 +186,7 @@ function ReformImpactTab() {
 
   const handleCalculate = () => {
     const request = buildRequest();
-    const reform = buildReform(reformType, reformParam);
+    const reform = buildReform(reformType, reformParam, phaseInYears);
     setSubmittedRequest(request);
     setSubmittedReform(reform);
     setTriggered(true);
@@ -194,9 +195,10 @@ function ReformImpactTab() {
     runStateImpact(reform);
   };
 
-  const handleReformChange = (type: ReformType, param: number) => {
+  const handleReformChange = (type: ReformType, param: number, years: number) => {
     setReformType(type);
     setReformParam(param);
+    setPhaseInYears(years);
   };
 
   return (
@@ -345,6 +347,7 @@ function ReformImpactTab() {
         <ReformBuilder
           type={reformType}
           param={reformParam}
+          phaseInYears={phaseInYears}
           onChange={handleReformChange}
         />
       </div>

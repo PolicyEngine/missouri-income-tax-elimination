@@ -31,8 +31,11 @@ const PERIOD = '2026-01-01.2100-12-31';
  * type and its parameter.
  *
  * Parameter interpretation by reform type:
- *   - proportional:    param is the fractional cut in [0, 1]. e.g. 0.5 =
- *                      cut every non-zero bracket rate in half.
+ *   - proportional:    param is the total fractional cut in [0, 1] (e.g. 1.0
+ *                      = eliminate; 0.5 = halve the rates). When
+ *                      phaseInYears > 1, the cut is phased in linearly over
+ *                      that many years starting in 2026, holding at the final
+ *                      level thereafter.
  *   - top_cap:         param is the new top-bracket rate as a decimal
  *                      (e.g. 0.03 for 3%).
  *   - eliminate_top:   param is unused. Sets rates[7].threshold to a very
@@ -43,18 +46,24 @@ const PERIOD = '2026-01-01.2100-12-31';
 export function buildReform(
   type: ReformType,
   param: number,
+  phaseInYears = 1,
 ): Record<string, Record<string, number | boolean>> {
   const reform: Record<string, Record<string, number | boolean>> = {};
 
   if (type === 'proportional') {
-    // Multiply every non-zero bracket rate by (1 - param).
-    // Bracket 0 is already 0% so we skip it.
-    const factor = 1 - param;
+    const steps = Math.max(1, Math.floor(phaseInYears));
+    // Generate per-year periods. Each year Y (1..steps) applies a cumulative
+    // cut of (Y/steps) * param; after year `steps`, the final level holds.
     for (let i = 1; i < MO_2025_RATES.length; i++) {
-      const newRate = MO_2025_RATES[i] * factor;
-      reform[`gov.states.mo.tax.income.rates[${i}].rate`] = {
-        [PERIOD]: newRate,
-      };
+      const periods: Record<string, number> = {};
+      for (let y = 1; y <= steps; y++) {
+        const cumulativeCut = (y / steps) * param;
+        const newRate = MO_2025_RATES[i] * (1 - cumulativeCut);
+        const yearStart = 2025 + y;
+        const yearEnd = y === steps ? '2100-12-31' : `${yearStart}-12-31`;
+        periods[`${yearStart}-01-01.${yearEnd}`] = newRate;
+      }
+      reform[`gov.states.mo.tax.income.rates[${i}].rate`] = periods;
     }
     return reform;
   }
