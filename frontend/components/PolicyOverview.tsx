@@ -9,26 +9,25 @@ export default function PolicyOverview() {
           Missouri Income Tax Elimination
         </h2>
         <p className="text-gray-700 mb-4">
-          Missouri&apos;s <strong>HJR 173</strong> and <strong>HJR 174</strong> are
-          joint resolutions proposing a constitutional amendment that would let
-          the legislature cut or eliminate Missouri&apos;s individual income tax.
-          Because it amends the state constitution, the measure must be <strong>
-          approved by Missouri voters in a statewide referendum</strong> before
-          taking effect. Even if voters approve, the resolutions themselves
-          don&apos;t pick a path &mdash; no timeline, no trigger formula, no
-          mandated offsets. The legislature is left to decide <em>how</em> and
-          <em> when</em> to phase the tax down. This dashboard lets you explore
-          several plausible paths and see how each one would affect households
-          and state revenue.
+          Missouri House Joint Resolutions <strong>173</strong> and
+          <strong> 174</strong> propose a constitutional amendment that would
+          authorize the General Assembly to reduce or eliminate Missouri&apos;s
+          individual income tax. Because the measure amends the state
+          constitution, it must be ratified by Missouri voters in a statewide
+          referendum before taking effect. The resolutions do not prescribe a
+          specific implementation path &mdash; they do not set a timeline, a
+          trigger formula, or mandated revenue offsets, leaving those details
+          to subsequent legislation. This dashboard allows users to examine
+          several plausible elimination paths and their projected effects on
+          households and state revenue.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <h3 className="font-semibold text-gray-800 mb-2">What&apos;s proposed</h3>
+            <h3 className="font-semibold text-gray-800 mb-2">Proposal</h3>
             <p className="text-sm text-gray-600">
-              HJR 173 &amp; 174 are constitutional amendments that must be
-              approved by Missouri voters in a statewide referendum. If ratified,
-              they authorize the legislature to cut or eliminate the individual
-              income tax without prescribing a specific path.
+              A constitutional amendment authorizing the General Assembly to
+              reduce or eliminate the individual income tax. Ratification
+              requires approval by Missouri voters in a statewide referendum.
             </p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
@@ -40,19 +39,20 @@ export default function PolicyOverview() {
             </p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <h3 className="font-semibold text-gray-800 mb-2">Explore scenarios</h3>
+            <h3 className="font-semibold text-gray-800 mb-2">Scenarios modeled</h3>
             <p className="text-sm text-gray-600">
-              Pick one of four reform types &mdash; proportional cut, top-rate
-              cap, eliminate-top-bracket, or full elimination &mdash; and see
-              the household and state impacts side by side.
+              Four reform types are available: a proportional reduction in all
+              bracket rates, a cap on the top marginal rate, elimination of the
+              top bracket, or full repeal of the income tax.
             </p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <h3 className="font-semibold text-gray-800 mb-2">Limitations</h3>
+            <h3 className="font-semibold text-gray-800 mb-2">Methodology and limitations</h3>
             <p className="text-sm text-gray-600">
-              Static estimates with no behavioral response. State impact is
-              projected for fiscal years 2026&ndash;2035 using PolicyEngine&apos;s
-              microsimulation of Missouri tax units.
+              Results are static estimates that do not incorporate behavioral
+              responses. State revenue impacts are projected for fiscal years
+              2026&ndash;2035 using PolicyEngine&apos;s microsimulation of
+              Missouri tax units.
             </p>
           </div>
         </div>
