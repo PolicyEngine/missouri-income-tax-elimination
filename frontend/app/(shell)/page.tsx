@@ -8,7 +8,7 @@ import StateImpact from '@/components/StateImpact';
 import { useStateImpact } from '@/hooks/useStateImpact';
 import type { HouseholdRequest } from '@/lib/types';
 import { parseHashParams } from '@/lib/embedding';
-import { buildReform, type ReformType } from '@/lib/reform';
+import { buildReform, defaultCustomRates, linearRamp, type ReformType } from '@/lib/reform';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'policy' | 'impact'>('policy');
@@ -101,10 +101,17 @@ function ReformImpactTab() {
   const [income, setIncome] = useState(initial.income);
   const [maxEarnings, setMaxEarnings] = useState(100000);
 
-  // Reform builder state.
+  // Reform builder state. For proportional/top_cap, `yearParams` holds
+  // a value per year (2027-2035). For eliminate_top / full_eliminate,
+  // `startYear` is used instead and `yearParams` is ignored.
   const [reformType, setReformType] = useState<ReformType>('proportional');
-  const [reformParam, setReformParam] = useState(0.5);
-  const [phaseInYears, setPhaseInYears] = useState(1);
+  const [yearParams, setYearParams] = useState<Record<number, number>>(() =>
+    linearRamp(0, 0.5),
+  );
+  const [startYear, setStartYear] = useState(2027);
+  const [customRates, setCustomRates] = useState<Record<number, number[]>>(() =>
+    defaultCustomRates(),
+  );
 
   // Submission state.
   const [triggered, setTriggered] = useState(false);
@@ -170,8 +177,8 @@ function ReformImpactTab() {
   };
 
   const currentReform = useMemo(
-    () => buildReform(reformType, reformParam, phaseInYears),
-    [reformType, reformParam, phaseInYears],
+    () => buildReform(reformType, yearParams, startYear, customRates),
+    [reformType, yearParams, startYear, customRates],
   );
 
   const buildRequest = (): HouseholdRequest => ({
@@ -179,14 +186,14 @@ function ReformImpactTab() {
     age_spouse: married ? ageSpouse : null,
     dependent_ages: dependentAges,
     income,
-    year: 2026,
+    year: 2027,
     max_earnings: maxEarnings,
     state_code: 'MO',
   });
 
   const handleCalculate = () => {
     const request = buildRequest();
-    const reform = buildReform(reformType, reformParam, phaseInYears);
+    const reform = buildReform(reformType, yearParams, startYear, customRates);
     setSubmittedRequest(request);
     setSubmittedReform(reform);
     setTriggered(true);
@@ -195,10 +202,16 @@ function ReformImpactTab() {
     runStateImpact(reform);
   };
 
-  const handleReformChange = (type: ReformType, param: number, years: number) => {
+  const handleReformChange = (
+    type: ReformType,
+    nextYearParams: Record<number, number>,
+    nextStartYear: number,
+    nextCustomRates: Record<number, number[]>,
+  ) => {
     setReformType(type);
-    setReformParam(param);
-    setPhaseInYears(years);
+    setYearParams(nextYearParams);
+    setStartYear(nextStartYear);
+    setCustomRates(nextCustomRates);
   };
 
   return (
@@ -346,8 +359,9 @@ function ReformImpactTab() {
         {/* Reform builder */}
         <ReformBuilder
           type={reformType}
-          param={reformParam}
-          phaseInYears={phaseInYears}
+          yearParams={yearParams}
+          startYear={startYear}
+          customRates={customRates}
           onChange={handleReformChange}
         />
       </div>

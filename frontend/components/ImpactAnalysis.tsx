@@ -186,7 +186,7 @@ export default function ImpactAnalysis({ request, triggered, maxEarnings, reform
       {/* Personal impact */}
       <div>
         <h3 className="text-xl font-bold text-gray-800 mb-4">
-          Your household impact from the selected Missouri reform ({request?.year ?? 2026})
+          Your household impact from the selected Missouri reform ({request?.year ?? 2027})
         </h3>
         <p className="text-gray-600 mb-4">
           Based on your employment income of <strong>{formatCurrency(request?.income ?? 0)}</strong>,
