@@ -10,21 +10,25 @@ export default function PolicyOverview() {
         </h2>
         <p className="text-gray-700 mb-4">
           Missouri&apos;s <strong>HJR 173</strong> and <strong>HJR 174</strong> are
-          joint resolutions that, if ratified, would amend the state
-          constitution to let the legislature cut or eliminate Missouri&apos;s
-          individual income tax. The resolutions themselves don&apos;t pick a
-          path &mdash; no timeline, no trigger formula, no mandated offsets. The
-          legislature is left to decide <em>how</em> and <em>when</em> to phase
-          the tax down. This dashboard lets you explore several plausible paths
-          and see how each one would affect households and state revenue.
+          joint resolutions proposing a constitutional amendment that would let
+          the legislature cut or eliminate Missouri&apos;s individual income tax.
+          Because it amends the state constitution, the measure must be <strong>
+          approved by Missouri voters in a statewide referendum</strong> before
+          taking effect. Even if voters approve, the resolutions themselves
+          don&apos;t pick a path &mdash; no timeline, no trigger formula, no
+          mandated offsets. The legislature is left to decide <em>how</em> and
+          <em> when</em> to phase the tax down. This dashboard lets you explore
+          several plausible paths and see how each one would affect households
+          and state revenue.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
             <h3 className="font-semibold text-gray-800 mb-2">What&apos;s proposed</h3>
             <p className="text-sm text-gray-600">
-              HJR 173 &amp; 174 authorize the Missouri legislature to cut or
-              eliminate the individual income tax &mdash; without prescribing a
-              specific path.
+              HJR 173 &amp; 174 are constitutional amendments that must be
+              approved by Missouri voters in a statewide referendum. If ratified,
+              they authorize the legislature to cut or eliminate the individual
+              income tax without prescribing a specific path.
             </p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
