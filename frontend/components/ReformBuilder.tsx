@@ -22,7 +22,7 @@ const REFORM_OPTIONS: {
   {
     id: 'top_cap',
     label: 'Top-rate cap',
-    description: 'Cap the top 4.7% bracket at a lower rate you choose.',
+    description: 'Cap the top marginal rate at a value you choose. Every bracket whose current rate exceeds the cap is reduced to it, keeping the schedule monotonic.',
   },
   {
     id: 'eliminate_top',

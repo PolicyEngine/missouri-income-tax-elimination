@@ -69,10 +69,15 @@ export function buildReform(
   }
 
   if (type === 'top_cap') {
-    // Set the 4.7% top bracket to the chosen rate.
-    reform['gov.states.mo.tax.income.rates[7].rate'] = {
-      [PERIOD]: param,
-    };
+    // Cap-and-flatten: every bracket whose current rate exceeds the cap gets
+    // reduced to the cap. This keeps the schedule monotonic (never regressive).
+    for (let i = 1; i < MO_2025_RATES.length; i++) {
+      if (MO_2025_RATES[i] > param) {
+        reform[`gov.states.mo.tax.income.rates[${i}].rate`] = {
+          [PERIOD]: param,
+        };
+      }
+    }
     return reform;
   }
 
