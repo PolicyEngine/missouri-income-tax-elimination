@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import ImpactAnalysis from '@/components/ImpactAnalysis';
 import PolicyOverview from '@/components/PolicyOverview';
 import ReformBuilder from '@/components/ReformBuilder';
 import StateImpact from '@/components/StateImpact';
 import { useStateImpact } from '@/hooks/useStateImpact';
+import { useMultiYearHouseholdImpact } from '@/hooks/useMultiYearHouseholdImpact';
 import type { HouseholdRequest } from '@/lib/types';
 import { parseHashParams } from '@/lib/embedding';
 import { buildReform, defaultCustomRates, linearRamp, type ReformType } from '@/lib/reform';
@@ -115,11 +116,17 @@ function ReformImpactTab() {
 
   // Submission state.
   const [triggered, setTriggered] = useState(false);
-  const [submittedRequest, setSubmittedRequest] = useState<HouseholdRequest | null>(null);
-  const [submittedReform, setSubmittedReform] = useState<Record<
-    string,
-    Record<string, number | boolean>
+  const [submittedBaseRequest, setSubmittedBaseRequest] = useState<Omit<
+    HouseholdRequest,
+    'year'
   > | null>(null);
+
+  // 9-year household impact orchestration (2027-2035).
+  const {
+    years: householdYears,
+    run: runHouseholdImpact,
+    reset: resetHouseholdImpact,
+  } = useMultiYearHouseholdImpact();
 
   // 10-year state impact orchestration.
   const {
@@ -176,27 +183,23 @@ function ReformImpactTab() {
     return isNaN(num) ? 0 : num;
   };
 
-  const currentReform = useMemo(
-    () => buildReform(reformType, yearParams, startYear, customRates),
-    [reformType, yearParams, startYear, customRates],
-  );
-
-  const buildRequest = (): HouseholdRequest => ({
+  const buildBaseRequest = (): Omit<HouseholdRequest, 'year'> => ({
     age_head: ageHead,
     age_spouse: married ? ageSpouse : null,
     dependent_ages: dependentAges,
     income,
-    year: 2027,
     max_earnings: maxEarnings,
     state_code: 'MO',
   });
 
   const handleCalculate = () => {
-    const request = buildRequest();
+    const baseRequest = buildBaseRequest();
     const reform = buildReform(reformType, yearParams, startYear, customRates);
-    setSubmittedRequest(request);
-    setSubmittedReform(reform);
+    setSubmittedBaseRequest(baseRequest);
     setTriggered(true);
+    // Kick off the 9-year household impact run (2027-2035).
+    resetHouseholdImpact();
+    runHouseholdImpact(baseRequest, reform);
     // Kick off the 10-year state impact run.
     resetStateImpact();
     runStateImpact(reform);
@@ -386,7 +389,7 @@ function ReformImpactTab() {
               key={v}
               onClick={() => {
                 setMaxEarnings(v);
-                setSubmittedRequest((prev) =>
+                setSubmittedBaseRequest((prev) =>
                   prev ? { ...prev, max_earnings: v } : null,
                 );
               }}
@@ -402,13 +405,12 @@ function ReformImpactTab() {
         </div>
       )}
 
-      {/* Household impact (fast) */}
-      {submittedRequest && (
+      {/* Household impact (fast) — runs for 2027-2035 with year navigation */}
+      {triggered && submittedBaseRequest && (
         <ImpactAnalysis
-          request={submittedRequest}
-          triggered={triggered}
+          years={householdYears}
+          baseRequest={submittedBaseRequest}
           maxEarnings={maxEarnings}
-          reform={submittedReform ?? currentReform}
         />
       )}
 
