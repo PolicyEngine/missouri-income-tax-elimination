@@ -27,35 +27,37 @@ export function useMultiYearHouseholdImpact() {
       setRunning(true);
       setYears(YEARS.map((y) => ({ year: y, status: 'pending' })));
 
-      await Promise.all(
-        YEARS.map(async (y) => {
+      // Sequential: the PolicyEngine API aborts / rate-limits when hit with
+      // 9 parallel household requests, and the first 4-5 succeed before the
+      // rest get cancelled. Running in order is slower overall (~15-20 s)
+      // but reliable and shows results progressively as each finishes.
+      for (const y of YEARS) {
+        setYears((prev) =>
+          prev.map((p) =>
+            p.year === y ? { ...p, status: 'computing' } : p,
+          ),
+        );
+        try {
+          const data = await api.calculateHouseholdImpact(
+            { ...baseRequest, year: y },
+            reform,
+          );
           setYears((prev) =>
             prev.map((p) =>
-              p.year === y ? { ...p, status: 'computing' } : p,
+              p.year === y ? { year: y, status: 'ok', data } : p,
             ),
           );
-          try {
-            const data = await api.calculateHouseholdImpact(
-              { ...baseRequest, year: y },
-              reform,
-            );
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y ? { year: y, status: 'ok', data } : p,
-              ),
-            );
-          } catch (e) {
-            const message = e instanceof Error ? e.message : 'Unknown error';
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y
-                  ? { year: y, status: 'error', error: message }
-                  : p,
-              ),
-            );
-          }
-        }),
-      );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Unknown error';
+          setYears((prev) =>
+            prev.map((p) =>
+              p.year === y
+                ? { year: y, status: 'error', error: message }
+                : p,
+            ),
+          );
+        }
+      }
 
       setRunning(false);
     },
