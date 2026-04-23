@@ -64,10 +64,44 @@ export function useMultiYearHouseholdImpact() {
     [],
   );
 
+  const runYear = useCallback(
+    async (
+      year: number,
+      baseRequest: Omit<HouseholdRequest, 'year'>,
+      reform: Record<string, Record<string, number | boolean>> = {},
+    ) => {
+      // Mark just this year as computing (keep other years as-is).
+      setYears((prev) =>
+        prev.map((p) =>
+          p.year === year ? { ...p, status: 'computing', error: undefined } : p,
+        ),
+      );
+      try {
+        const data = await api.calculateHouseholdImpact(
+          { ...baseRequest, year },
+          reform,
+        );
+        setYears((prev) =>
+          prev.map((p) =>
+            p.year === year ? { year, status: 'ok', data } : p,
+          ),
+        );
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Unknown error';
+        setYears((prev) =>
+          prev.map((p) =>
+            p.year === year ? { year, status: 'error', error: message } : p,
+          ),
+        );
+      }
+    },
+    [],
+  );
+
   const reset = useCallback(() => {
     setYears([]);
     setRunning(false);
   }, []);
 
-  return { years, running, run, reset };
+  return { years, running, run, runYear, reset };
 }

@@ -20,6 +20,8 @@ interface Props {
   years: YearHouseholdImpact[];
   baseRequest: Omit<HouseholdRequest, 'year'> | null;
   maxEarnings?: number;
+  selectedYear?: number;
+  onYearChange?: (year: number) => void;
 }
 
 const YEAR_LIST = [
@@ -28,20 +30,28 @@ const YEAR_LIST = [
 const MIN_YEAR = YEAR_LIST[0];
 const MAX_YEAR = YEAR_LIST[YEAR_LIST.length - 1];
 
-export default function ImpactAnalysis({ years, baseRequest, maxEarnings }: Props) {
-  const [selectedYear, setSelectedYear] = useState<number>(MIN_YEAR);
+export default function ImpactAnalysis({
+  years,
+  baseRequest,
+  maxEarnings,
+  selectedYear: selectedYearProp,
+  onYearChange,
+}: Props) {
+  const [internalYear, setInternalYear] = useState<number>(MIN_YEAR);
+  const selectedYear = selectedYearProp ?? internalYear;
+  const setSelectedYear = (y: number | ((prev: number) => number)) => {
+    const next = typeof y === 'function' ? y(selectedYear) : y;
+    setInternalYear(next);
+    onYearChange?.(next);
+  };
 
   // When the set of available years changes (new run resets years, or the
   // list re-populates), make sure the selected year is still valid.
   const yearsLength = years.length;
   useEffect(() => {
-    if (yearsLength > 0) {
-      setSelectedYear((prev) =>
-        years.some((y) => y.year === prev) ? prev : MIN_YEAR,
-      );
+    if (yearsLength > 0 && !years.some((y) => y.year === selectedYear)) {
+      setSelectedYear(MIN_YEAR);
     }
-    // `years` identity changes every render as statuses update; only react
-    // to length changes (new run / reset).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [yearsLength]);
 

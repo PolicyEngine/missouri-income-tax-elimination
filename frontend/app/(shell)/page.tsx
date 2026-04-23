@@ -100,7 +100,8 @@ function ReformImpactTab() {
   const [married, setMarried] = useState(initial.married);
   const [dependentAges, setDependentAges] = useState<number[]>(initial.dependents);
   const [income, setIncome] = useState(initial.income);
-  const [maxEarnings, setMaxEarnings] = useState(100000);
+  const [maxEarnings, setMaxEarnings] = useState(200000);
+  const [selectedYear, setSelectedYear] = useState(2027);
 
   // Reform builder state. For proportional/top_cap, `yearParams` holds
   // a value per year (2027-2035). For full_eliminate, `startYear` is used
@@ -120,11 +121,16 @@ function ReformImpactTab() {
     HouseholdRequest,
     'year'
   > | null>(null);
+  const [submittedReform, setSubmittedReform] = useState<Record<
+    string,
+    Record<string, number | boolean>
+  >>({});
 
   // 9-year household impact orchestration (2027-2035).
   const {
     years: householdYears,
     run: runHouseholdImpact,
+    runYear: runYearHousehold,
     reset: resetHouseholdImpact,
   } = useMultiYearHouseholdImpact();
 
@@ -196,6 +202,7 @@ function ReformImpactTab() {
     const baseRequest = buildBaseRequest();
     const reform = buildReform(reformType, yearParams, startYear, customRates);
     setSubmittedBaseRequest(baseRequest);
+    setSubmittedReform(reform);
     setTriggered(true);
     // Kick off the 9-year household impact run (2027-2035).
     resetHouseholdImpact();
@@ -384,14 +391,19 @@ function ReformImpactTab() {
       {triggered && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
           <span>Chart x-axis max:</span>
-          {[100000, 200000, 500000, 1000000].map((v) => (
+          {[200000, 500000, 1000000].map((v) => (
             <button
               key={v}
               onClick={() => {
                 setMaxEarnings(v);
-                setSubmittedBaseRequest((prev) =>
-                  prev ? { ...prev, max_earnings: v } : null,
-                );
+                const next = submittedBaseRequest
+                  ? { ...submittedBaseRequest, max_earnings: v }
+                  : null;
+                setSubmittedBaseRequest(next);
+                // Kick off a rerun for the currently-selected year only.
+                if (next) {
+                  runYearHousehold(selectedYear, next, submittedReform ?? {});
+                }
               }}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                 maxEarnings === v
@@ -411,6 +423,8 @@ function ReformImpactTab() {
           years={householdYears}
           baseRequest={submittedBaseRequest}
           maxEarnings={maxEarnings}
+          selectedYear={selectedYear}
+          onYearChange={setSelectedYear}
         />
       )}
 
