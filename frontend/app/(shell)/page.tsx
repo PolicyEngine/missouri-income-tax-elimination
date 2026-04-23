@@ -125,6 +125,7 @@ function ReformImpactTab() {
     string,
     Record<string, number | boolean>
   >>({});
+  const [skipHousehold, setSkipHousehold] = useState(false);
 
   // 9-year household impact orchestration (2027-2035).
   const {
@@ -204,9 +205,11 @@ function ReformImpactTab() {
     setSubmittedBaseRequest(baseRequest);
     setSubmittedReform(reform);
     setTriggered(true);
-    // Kick off the 9-year household impact run (2027-2035).
+    // Kick off the 9-year household impact run (2027-2035) unless skipped.
     resetHouseholdImpact();
-    runHouseholdImpact(baseRequest, reform);
+    if (!skipHousehold) {
+      runHouseholdImpact(baseRequest, reform);
+    }
     // Kick off the 10-year state impact run.
     resetStateImpact();
     runStateImpact(reform);
@@ -376,8 +379,8 @@ function ReformImpactTab() {
         />
       </div>
 
-      {/* Calculate button */}
-      <div>
+      {/* Calculate button + skip-household toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <button
           onClick={handleCalculate}
           disabled={stateRunning}
@@ -385,10 +388,19 @@ function ReformImpactTab() {
         >
           {stateRunning ? 'Calculating…' : 'Calculate impact'}
         </button>
+        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={skipHousehold}
+            onChange={(e) => setSkipHousehold(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
+          />
+          Skip household impact (state revenue only)
+        </label>
       </div>
 
       {/* Chart x-axis options */}
-      {triggered && (
+      {triggered && !skipHousehold && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
           <span>Chart x-axis max:</span>
           {[200000, 500000, 1000000].map((v) => (
@@ -418,7 +430,7 @@ function ReformImpactTab() {
       )}
 
       {/* Household impact (fast) — runs for 2027-2035 with year navigation */}
-      {triggered && submittedBaseRequest && (
+      {triggered && !skipHousehold && submittedBaseRequest && (
         <ImpactAnalysis
           years={householdYears}
           baseRequest={submittedBaseRequest}
