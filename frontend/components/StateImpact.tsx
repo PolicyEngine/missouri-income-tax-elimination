@@ -113,7 +113,7 @@ export default function StateImpact({ years, running }: Props) {
     <div className="space-y-8">
       <div>
         <h2 className="text-2xl font-bold text-primary">
-          10-year state revenue impact
+          State revenue impact, 2027&ndash;2035
         </h2>
         <p className="text-sm text-gray-600 mt-1">
           Change in Missouri state tax revenue under the chosen reform,
@@ -133,7 +133,7 @@ export default function StateImpact({ years, running }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <p className="text-sm text-gray-600 mb-2">
-            10-year total state revenue change
+            Total state revenue change, 2027&ndash;2035
           </p>
           <p
             className={`text-3xl font-bold ${
@@ -149,7 +149,7 @@ export default function StateImpact({ years, running }: Props) {
               : '—'}
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            Sum of state revenue change, 2026&ndash;2035
+            Sum of state revenue change, 2027&ndash;2035
           </p>
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-6">
