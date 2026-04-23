@@ -34,46 +34,47 @@ export function useStateImpact() {
 
       try {
         const policyId = await createPolicy(reform);
-        await Promise.all(
-          YEARS.map(async (y) => {
-            if (controller.signal.aborted) return;
+        // Run years sequentially so each result appears as soon as its
+        // simulation finishes, and we don't hammer the API with 9 parallel
+        // requests that stall each other.
+        for (const y of YEARS) {
+          if (controller.signal.aborted) break;
+          setYears((prev) =>
+            prev.map((p) =>
+              p.year === y ? { ...p, status: 'computing' } : p,
+            ),
+          );
+          try {
+            const result = await pollEconomicImpact(
+              policyId,
+              y,
+              undefined,
+              controller.signal,
+            );
             setYears((prev) =>
               prev.map((p) =>
-                p.year === y ? { ...p, status: 'computing' } : p,
+                p.year === y
+                  ? {
+                      year: y,
+                      status: 'ok',
+                      budget: result.budget as BudgetImpact,
+                    }
+                  : p,
               ),
             );
-            try {
-              const result = await pollEconomicImpact(
-                policyId,
-                y,
-                undefined,
-                controller.signal,
-              );
-              setYears((prev) =>
-                prev.map((p) =>
-                  p.year === y
-                    ? {
-                        year: y,
-                        status: 'ok',
-                        budget: result.budget as BudgetImpact,
-                      }
-                    : p,
-                ),
-              );
-            } catch (e) {
-              if (controller.signal.aborted) return;
-              const message =
-                e instanceof Error ? e.message : 'Unknown error';
-              setYears((prev) =>
-                prev.map((p) =>
-                  p.year === y
-                    ? { year: y, status: 'error', error: message }
-                    : p,
-                ),
-              );
-            }
-          }),
-        );
+          } catch (e) {
+            if (controller.signal.aborted) break;
+            const message =
+              e instanceof Error ? e.message : 'Unknown error';
+            setYears((prev) =>
+              prev.map((p) =>
+                p.year === y
+                  ? { year: y, status: 'error', error: message }
+                  : p,
+              ),
+            );
+          }
+        }
       } catch (e) {
         // createPolicy failed — mark everything as error.
         const message = e instanceof Error ? e.message : 'Unknown error';

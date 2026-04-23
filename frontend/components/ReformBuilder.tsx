@@ -86,7 +86,7 @@ function defaultYearParamsFor(type: ReformType): Record<number, number> {
 
 /** Default start year for binary reforms. */
 function defaultStartYearFor(_type: ReformType): number {
-  return 2026;
+  return 2027;
 }
 
 export default function ReformBuilder({
@@ -440,7 +440,7 @@ function StartYearSelect({
   value: number;
   onChange: (year: number) => void;
 }) {
-  const years = [2026, ...REFORM_YEARS];
+  const years = REFORM_YEARS;
   return (
     <div className="mt-3">
       <label className="block text-xs font-medium text-gray-600 mb-1.5">
