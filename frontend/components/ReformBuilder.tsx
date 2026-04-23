@@ -14,10 +14,10 @@ interface Props {
   type: ReformType;
   /**
    * Per-year params. For proportional/top_cap, keys are years 2027-2035.
-   * For eliminate_top / full_eliminate / custom this is unused (pass {}).
+   * For full_eliminate / custom this is unused (pass {}).
    */
   yearParams: Record<number, number>;
-  /** Used only for eliminate_top / full_eliminate. */
+  /** Used only for full_eliminate. */
   startYear: number;
   /** 9 × 8 matrix (year × bracket) of rates for the custom reform. */
   customRates: Record<number, number[]>;
@@ -45,11 +45,6 @@ const REFORM_OPTIONS: {
     description: 'Cap the top marginal rate at a value you choose for each year. Every bracket whose current rate exceeds that year\'s cap is reduced to it.',
   },
   {
-    id: 'eliminate_top',
-    label: 'Eliminate top bracket',
-    description: 'Merge the top 4.7% bracket into the next one down.',
-  },
-  {
     id: 'full_eliminate',
     label: 'Full elimination',
     description: 'Set every Missouri bracket rate to zero.',
@@ -63,18 +58,18 @@ const REFORM_OPTIONS: {
 ];
 
 /**
- * 2025 bracket thresholds used for tooltip labels on the custom table
- * column headers. Rates in parentheses come from `MO_2025_RATES`.
+ * 2025 bracket threshold ranges for the custom schedule UI, indexed by
+ * bracket (0–7). Used as labels in the per-year bracket table.
  */
-const BRACKET_LABELS: string[] = [
-  '0: $0–$1,313',
-  '1: $1,313–$2,626',
-  '2: $2,626–$3,939',
-  '3: $3,939–$5,252',
-  '4: $5,252–$6,565',
-  '5: $6,565–$7,878',
-  '6: $7,878–$9,191',
-  '7: $9,191+',
+const BRACKET_THRESHOLDS: string[] = [
+  '$0 – $1,313',
+  '$1,313 – $2,626',
+  '$2,626 – $3,939',
+  '$3,939 – $5,252',
+  '$5,252 – $6,565',
+  '$6,565 – $7,878',
+  '$7,878 – $9,191',
+  '$9,191+',
 ];
 
 /** Default year-params for each reform type. */
@@ -84,8 +79,8 @@ function defaultYearParamsFor(type: ReformType): Record<number, number> {
     // Linear ramp from current 4.7% down toward 3% by 2035.
     return linearRamp(0.047, 0.03);
   }
-  // eliminate_top, full_eliminate, and custom all use {} (customRates handles
-  // the matrix for the custom reform).
+  // full_eliminate and custom both use {} (customRates handles the matrix
+  // for the custom reform).
   return {};
 }
 
@@ -161,14 +156,14 @@ export default function ReformBuilder({
                     />
                   )}
 
-                  {selected &&
-                    (opt.id === 'eliminate_top' ||
-                      opt.id === 'full_eliminate') && (
-                      <StartYearSelect
-                        value={startYear}
-                        onChange={(y) => onChange(opt.id, {}, y, customRates)}
-                      />
-                    )}
+                  {selected && opt.id === 'full_eliminate' && (
+                    <StartYearSelect
+                      value={startYear}
+                      onChange={(y) =>
+                        onChange('full_eliminate', {}, y, customRates)
+                      }
+                    />
+                  )}
 
                   {selected && opt.id === 'custom' && (
                     <CustomRatesTable
@@ -479,7 +474,14 @@ function CustomRatesTable({
   onChange: (cr: Record<number, number[]>) => void;
 }) {
   const [rampFrom, setRampFrom] = useState(0);
-  const [rampTo, setRampTo] = useState(50);
+  const [rampTo, setRampTo] = useState(100);
+  // Currently-selected year index into REFORM_YEARS. Starts at the first
+  // year (2027) so the prev-arrow is disabled initially.
+  const [yearIdx, setYearIdx] = useState(0);
+  const year = REFORM_YEARS[yearIdx];
+  const prevYear = yearIdx > 0 ? REFORM_YEARS[yearIdx - 1] : null;
+  const canGoPrev = yearIdx > 0;
+  const canGoNext = yearIdx < REFORM_YEARS.length - 1;
 
   /** Return a deep-copy of the current matrix, filling missing rows. */
   const cloneMatrix = (): Record<number, number[]> => {
@@ -491,14 +493,27 @@ function CustomRatesTable({
     return out;
   };
 
-  const handleCellChange = (year: number, bracket: number, percent: number) => {
+  const handleCellChange = (bracket: number, percent: number) => {
     const next = cloneMatrix();
     const clamped = Math.max(0, Math.min(10, percent));
     next[year][bracket] = clamped / 100;
     onChange(next);
   };
 
-  const handleReset = () => {
+  const handleResetYear = () => {
+    const next = cloneMatrix();
+    next[year] = [...MO_2025_RATES];
+    onChange(next);
+  };
+
+  const handleCopyPrev = () => {
+    if (prevYear === null) return;
+    const next = cloneMatrix();
+    next[year] = [...next[prevYear]];
+    onChange(next);
+  };
+
+  const handleResetAll = () => {
     onChange(defaultCustomRates());
   };
 
@@ -506,34 +521,144 @@ function CustomRatesTable({
     const n = REFORM_YEARS.length;
     const next: Record<number, number[]> = {};
     for (let idx = 0; idx < n; idx++) {
-      const year = REFORM_YEARS[idx];
+      const y = REFORM_YEARS[idx];
       const t = n === 1 ? 1 : idx / (n - 1);
       const cutPct = rampFrom + (rampTo - rampFrom) * t;
       const cut = cutPct / 100;
-      next[year] = MO_2025_RATES.map((r) => r * (1 - cut));
+      next[y] = MO_2025_RATES.map((r) => r * (1 - cut));
     }
     onChange(next);
   };
 
-  const handleCopyPrevious = (year: number) => {
-    const idx = REFORM_YEARS.indexOf(year);
-    if (idx <= 0) return;
-    const prevYear = REFORM_YEARS[idx - 1];
-    const next = cloneMatrix();
-    next[year] = [...next[prevYear]];
-    onChange(next);
-  };
+  const currentRow = customRates[year] ?? MO_2025_RATES;
 
   return (
     <div className="mt-3 space-y-3">
+      {/* Year navigation */}
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-gray-700">Year:</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => canGoPrev && setYearIdx(yearIdx - 1)}
+              disabled={!canGoPrev}
+              aria-label="Previous year"
+              className="px-2 py-1 rounded-md bg-white border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {'\u25C0'}
+            </button>
+            <span className="text-sm font-semibold text-gray-900 min-w-[3.5rem] text-center">
+              {year}
+            </span>
+            <button
+              type="button"
+              onClick={() => canGoNext && setYearIdx(yearIdx + 1)}
+              disabled={!canGoNext}
+              aria-label="Next year"
+              className="px-2 py-1 rounded-md bg-white border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {'\u25B6'}
+            </button>
+          </div>
+          <span className="text-[10px] text-gray-500 whitespace-nowrap">
+            {REFORM_YEARS[0]}–{REFORM_YEARS[REFORM_YEARS.length - 1]}
+          </span>
+        </div>
+      </div>
+
+      {/* Per-year bracket table */}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1.5">
+          Rate by bracket for {year}
+        </label>
+        <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="px-2 py-1.5 text-left font-medium text-gray-600 border-b border-gray-200 w-12">
+                  Bkt
+                </th>
+                <th className="px-2 py-1.5 text-left font-medium text-gray-600 border-b border-gray-200">
+                  Threshold
+                </th>
+                <th className="px-2 py-1.5 text-right font-medium text-gray-600 border-b border-gray-200 w-24">
+                  Rate (%)
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {BRACKET_THRESHOLDS.map((threshold, i) => {
+                const rate = currentRow[i] ?? 0;
+                const percent = +(rate * 100).toFixed(2);
+                return (
+                  <tr key={i} className="border-b border-gray-100 last:border-b-0">
+                    <td className="px-2 py-1.5 font-medium text-gray-700">
+                      {i}
+                    </td>
+                    <td className="px-2 py-1.5 text-gray-600">{threshold}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        value={percent}
+                        disabled={i === 0}
+                        onChange={(e) => {
+                          const raw = Number(e.target.value);
+                          handleCellChange(i, isNaN(raw) ? 0 : raw);
+                        }}
+                        aria-label={`${year} bracket ${i} rate`}
+                        className="w-20 px-2 py-0.5 bg-white border border-gray-200 rounded text-xs text-gray-900 text-right focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors disabled:bg-gray-100 disabled:text-gray-400"
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-1 text-[10px] text-gray-500">
+          Rates are entered in percent. Bracket 0 is fixed at 0%. Max 10% as a
+          safety cap.
+        </p>
+      </div>
+
+      {/* Per-year actions */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={handleResetYear}
+          className="px-2 py-1 rounded-md bg-white border border-gray-300 text-gray-700 text-xs font-medium hover:bg-gray-100 transition-colors"
+        >
+          Reset {year} to baseline
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyPrev}
+          disabled={prevYear === null}
+          className="px-2 py-1 rounded-md bg-white border border-gray-300 text-gray-700 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {prevYear !== null
+            ? `Copy ${prevYear} \u2192 ${year}`
+            : `Copy previous year`}
+        </button>
+      </div>
+
+      {/* Apply-to-all-years section */}
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+        <div className="text-[11px] font-semibold text-gray-700 uppercase tracking-wide">
+          Apply to all years ({REFORM_YEARS[0]}–
+          {REFORM_YEARS[REFORM_YEARS.length - 1]})
+        </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
             type="button"
-            onClick={handleReset}
+            onClick={handleResetAll}
             className="px-2 py-1 rounded-md bg-white border border-gray-300 text-gray-700 text-xs font-medium hover:bg-gray-100 transition-colors"
           >
-            Reset to 2025 baseline
+            Reset all to baseline
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -555,7 +680,7 @@ function CustomRatesTable({
             step={5}
             suffix="%"
           />
-          <span className="text-gray-500">cut over 2027–2035</span>
+          <span className="text-gray-500">cut over 9 years</span>
           <button
             type="button"
             onClick={handleApplyRamp}
@@ -564,92 +689,6 @@ function CustomRatesTable({
             Apply ramp
           </button>
         </div>
-      </div>
-
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1.5">
-          Bracket rate by year (columns are bracket indices 0–7; hover for
-          thresholds)
-        </label>
-        <div className="overflow-x-auto">
-          <table className="text-xs border-collapse">
-            <thead>
-              <tr>
-                <th className="sticky left-0 bg-gray-50 px-2 py-1 text-left font-medium text-gray-600 border-b border-gray-200">
-                  Year
-                </th>
-                {BRACKET_LABELS.map((label, i) => (
-                  <th
-                    key={i}
-                    title={label}
-                    className="px-1 py-1 text-center font-medium text-gray-600 border-b border-gray-200"
-                  >
-                    {i}
-                  </th>
-                ))}
-                <th className="px-2 py-1 border-b border-gray-200" />
-              </tr>
-            </thead>
-            <tbody>
-              {REFORM_YEARS.map((year, rowIdx) => {
-                const row = customRates[year] ?? MO_2025_RATES;
-                return (
-                  <tr key={year}>
-                    <td className="sticky left-0 bg-white px-2 py-1 font-medium text-gray-700 border-b border-gray-100">
-                      {year}
-                    </td>
-                    {BRACKET_LABELS.map((label, i) => {
-                      const rate = row[i] ?? 0;
-                      const percent = +(rate * 100).toFixed(2);
-                      return (
-                        <td
-                          key={i}
-                          className="px-0.5 py-1 border-b border-gray-100"
-                        >
-                          <input
-                            type="number"
-                            min={0}
-                            max={10}
-                            step={0.1}
-                            value={percent}
-                            disabled={i === 0}
-                            onChange={(e) => {
-                              const raw = Number(e.target.value);
-                              handleCellChange(
-                                year,
-                                i,
-                                isNaN(raw) ? 0 : raw,
-                              );
-                            }}
-                            title={label}
-                            aria-label={`${year} bracket ${i} rate (${label})`}
-                            className="w-16 px-1 py-0.5 bg-white border border-gray-200 rounded text-xs text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors disabled:bg-gray-100 disabled:text-gray-400"
-                          />
-                        </td>
-                      );
-                    })}
-                    <td className="px-2 py-1 border-b border-gray-100">
-                      {rowIdx > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => handleCopyPrevious(year)}
-                          className="px-1.5 py-0.5 rounded bg-white border border-gray-300 text-gray-600 text-[10px] font-medium hover:bg-gray-100 transition-colors whitespace-nowrap"
-                          title={`Copy ${REFORM_YEARS[rowIdx - 1]} into ${year}`}
-                        >
-                          Copy prev
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-1 text-[10px] text-gray-500">
-          Rates are entered in percent. Bracket 0 is fixed at 0%. Max 10% as a
-          safety cap.
-        </p>
       </div>
     </div>
   );

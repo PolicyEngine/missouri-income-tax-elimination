@@ -15,7 +15,6 @@
 export type ReformType =
   | 'proportional'
   | 'top_cap'
-  | 'eliminate_top'
   | 'full_eliminate'
   | 'custom';
 
@@ -44,8 +43,6 @@ const FINAL_END = '2100-12-31';
  *   - top_cap:         `yearParams[Y]` is the top-rate cap in [0, 0.047] for
  *                      year Y. Every bracket whose 2025 rate exceeds the cap
  *                      is reduced to the cap in that year.
- *   - eliminate_top:   yearParams ignored. Uses `startYear` (default 2027) for
- *                      the period start. Sets rates[7].threshold to 999999999.
  *   - full_eliminate:  yearParams ignored. Uses `startYear` (default 2027) for
  *                      the period start. Sets every non-zero bracket rate to 0.
  *   - custom:          `customRates[Y]` is an 8-element array of bracket rates
@@ -102,15 +99,6 @@ export function buildReform(
         reform[`gov.states.mo.tax.income.rates[${i}].rate`] = periods;
       }
     }
-    return reform;
-  }
-
-  if (type === 'eliminate_top') {
-    // Push the top bracket's threshold to "infinity" starting in startYear.
-    const period = `${startYear}-01-01.${FINAL_END}`;
-    reform['gov.states.mo.tax.income.rates[7].threshold'] = {
-      [period]: 999999999,
-    };
     return reform;
   }
 

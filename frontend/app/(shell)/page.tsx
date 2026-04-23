@@ -102,8 +102,8 @@ function ReformImpactTab() {
   const [maxEarnings, setMaxEarnings] = useState(100000);
 
   // Reform builder state. For proportional/top_cap, `yearParams` holds
-  // a value per year (2027-2035). For eliminate_top / full_eliminate,
-  // `startYear` is used instead and `yearParams` is ignored.
+  // a value per year (2027-2035). For full_eliminate, `startYear` is used
+  // instead and `yearParams` is ignored.
   const [reformType, setReformType] = useState<ReformType>('proportional');
   const [yearParams, setYearParams] = useState<Record<number, number>>(() =>
     linearRamp(0, 0.5),
