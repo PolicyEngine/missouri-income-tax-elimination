@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import ImpactAnalysis from '@/components/ImpactAnalysis';
 import PolicyOverview from '@/components/PolicyOverview';
-import ReformBuilder from '@/components/ReformBuilder';
+import RateMatrixBuilder from '@/components/RateMatrixBuilder';
 import StateImpact from '@/components/StateImpact';
 import { useStateImpact } from '@/hooks/useStateImpact';
 import { useMultiYearHouseholdImpact } from '@/hooks/useMultiYearHouseholdImpact';
 import type { HouseholdRequest } from '@/lib/types';
 import { parseHashParams } from '@/lib/embedding';
-import { buildReform, defaultCustomRates, linearRamp, type ReformType } from '@/lib/reform';
+import { buildReform, defaultCustomRates } from '@/lib/reform';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'policy' | 'impact'>('policy');
@@ -103,14 +103,8 @@ function ReformImpactTab() {
   const [maxEarnings, setMaxEarnings] = useState(200000);
   const [selectedYear, setSelectedYear] = useState(2027);
 
-  // Reform builder state. For proportional/top_cap, `yearParams` holds
-  // a value per year (2027-2035). For full_eliminate, `startYear` is used
-  // instead and `yearParams` is ignored.
-  const [reformType, setReformType] = useState<ReformType>('proportional');
-  const [yearParams, setYearParams] = useState<Record<number, number>>(() =>
-    linearRamp(0, 0.5),
-  );
-  const [startYear, setStartYear] = useState(2027);
+  // Reform builder state: a 9-year x 8-bracket matrix of rates for 2027-2035.
+  // The matrix IS the reform; serialized via buildReform(type='custom', ...).
   const [customRates, setCustomRates] = useState<Record<number, number[]>>(() =>
     defaultCustomRates(),
   );
@@ -201,7 +195,7 @@ function ReformImpactTab() {
 
   const handleCalculate = () => {
     const baseRequest = buildBaseRequest();
-    const reform = buildReform(reformType, yearParams, startYear, customRates);
+    const reform = buildReform('custom', {}, 2027, customRates);
     setSubmittedBaseRequest(baseRequest);
     setSubmittedReform(reform);
     setTriggered(true);
@@ -215,23 +209,13 @@ function ReformImpactTab() {
     runStateImpact(reform);
   };
 
-  const handleReformChange = (
-    type: ReformType,
-    nextYearParams: Record<number, number>,
-    nextStartYear: number,
-    nextCustomRates: Record<number, number[]>,
-  ) => {
-    setReformType(type);
-    setYearParams(nextYearParams);
-    setStartYear(nextStartYear);
-    setCustomRates(nextCustomRates);
-  };
-
   return (
     <div className="space-y-6">
-      {/* Input layout: household left, reform right on desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Household form */}
+      {/* Reform builder on top */}
+      <RateMatrixBuilder customRates={customRates} onChange={setCustomRates} />
+
+      {/* Household form below */}
+      <div className="grid grid-cols-1 gap-6">
         <section className="bg-gray-50 rounded-xl p-6 md:p-8 border border-gray-200 shadow-sm">
           <h2 className="text-xl font-bold text-gray-900 mb-6">Your household</h2>
 
@@ -368,15 +352,6 @@ function ReformImpactTab() {
             </div>
           </div>
         </section>
-
-        {/* Reform builder */}
-        <ReformBuilder
-          type={reformType}
-          yearParams={yearParams}
-          startYear={startYear}
-          customRates={customRates}
-          onChange={handleReformChange}
-        />
       </div>
 
       {/* Calculate button + skip-household toggle */}
