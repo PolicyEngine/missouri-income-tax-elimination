@@ -41,9 +41,10 @@ export default function PolicyOverview() {
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
             <h3 className="font-semibold text-gray-800 mb-2">Scenarios modeled</h3>
             <p className="text-sm text-gray-600">
-              Four reform types are available: a proportional reduction in all
-              bracket rates, a cap on the top marginal rate, elimination of the
-              top bracket, or full repeal of the income tax.
+              Four reform types are available: a percentage-point reduction
+              applied to every bracket rate, a cap on the top marginal rate,
+              elimination of the top bracket, or full repeal of the income
+              tax.
             </p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">

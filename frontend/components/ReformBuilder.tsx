@@ -36,8 +36,8 @@ const REFORM_OPTIONS: {
 }[] = [
   {
     id: 'proportional',
-    label: 'Proportional rate cut',
-    description: 'Reduce every Missouri bracket rate by the same percentage. Pick a cut per year from 2027 through 2035.',
+    label: 'Percentage-point rate cut',
+    description: 'Subtract the same number of percentage points from every Missouri bracket rate. Pick a pp reduction per year from 2027 through 2035; rates are clamped at 0%.',
   },
   {
     id: 'top_cap',
@@ -74,7 +74,8 @@ const BRACKET_THRESHOLDS: string[] = [
 
 /** Default year-params for each reform type. */
 function defaultYearParamsFor(type: ReformType): Record<number, number> {
-  if (type === 'proportional') return linearRamp(0, 0.5);
+  // Default ramp: 0pp in 2027 → 1.0pp in 2035 (stored as fraction).
+  if (type === 'proportional') return linearRamp(0, 0.01);
   if (type === 'top_cap') {
     // Linear ramp from current 4.7% down toward 3% by 2035.
     return linearRamp(0.047, 0.03);
@@ -192,12 +193,14 @@ function ProportionalYearTable({
   yearParams: Record<number, number>;
   onChange: (yp: Record<number, number>) => void;
 }) {
+  // pp reductions stored as fractions; UI works in pp units (e.g. 1.5 = 1.5pp).
+  // Top MO 2025 rate is 4.7%, so the meaningful range is 0–4.7pp.
   const [rampStart, setRampStart] = useState(0);
-  const [rampEnd, setRampEnd] = useState(50);
-  const [applyAll, setApplyAll] = useState(50);
+  const [rampEnd, setRampEnd] = useState(1.0);
+  const [applyAll, setApplyAll] = useState(1.0);
 
-  const handleYearChange = (year: number, percent: number) => {
-    onChange({ ...yearParams, [year]: percent / 100 });
+  const handleYearChange = (year: number, pp: number) => {
+    onChange({ ...yearParams, [year]: pp / 100 });
   };
 
   return (
@@ -209,18 +212,18 @@ function ProportionalYearTable({
             value={rampStart}
             onChange={setRampStart}
             min={0}
-            max={100}
-            step={5}
-            suffix="%"
+            max={4.7}
+            step={0.1}
+            suffix=" pp"
           />
           <span className="text-gray-500">to</span>
           <NumberBox
             value={rampEnd}
             onChange={setRampEnd}
             min={0}
-            max={100}
-            step={5}
-            suffix="%"
+            max={4.7}
+            step={0.1}
+            suffix=" pp"
           />
           <span className="text-gray-500">over 2027–2035</span>
           <button
@@ -239,9 +242,9 @@ function ProportionalYearTable({
             value={applyAll}
             onChange={setApplyAll}
             min={0}
-            max={100}
-            step={5}
-            suffix="%"
+            max={4.7}
+            step={0.1}
+            suffix=" pp"
           />
           <button
             type="button"
@@ -262,11 +265,11 @@ function ProportionalYearTable({
 
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1.5">
-          Rate reduction by year
+          Rate reduction by year (pp subtracted from every bracket)
         </label>
         <div className="grid grid-cols-3 gap-2">
           {REFORM_YEARS.map((year) => {
-            const percent = Math.round((yearParams[year] ?? 0) * 100);
+            const pp = (yearParams[year] ?? 0) * 100;
             return (
               <div
                 key={year}
@@ -277,15 +280,15 @@ function ProportionalYearTable({
                     {year}
                   </span>
                   <span className="text-[11px] font-semibold text-gray-900">
-                    {percent}%
+                    {pp.toFixed(1)} pp
                   </span>
                 </div>
                 <input
                   type="range"
                   min={0}
-                  max={100}
-                  step={5}
-                  value={percent}
+                  max={4.7}
+                  step={0.1}
+                  value={pp}
                   onChange={(e) =>
                     handleYearChange(year, Number(e.target.value))
                   }

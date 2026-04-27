@@ -36,10 +36,13 @@ const FINAL_END = '2100-12-31';
  * type and per-year params.
  *
  * Parameter interpretation by reform type:
- *   - proportional:    `yearParams[Y]` is the fractional cut in [0, 1] for
- *                      year Y (e.g. 1.0 = fully eliminate; 0.5 = halve rates).
- *                      Each non-zero year gets its own period; the final year
- *                      in REFORM_YEARS has its end date extended to 2100.
+ *   - proportional:    `yearParams[Y]` is a percentage-point reduction, stored
+ *                      as a fraction (e.g. 0.015 = 1.5pp; 0.047 = subtract 4.7pp
+ *                      which zeroes the top bracket and any below it).
+ *                      ``new_rate = max(0, old_rate - yearParams[Y])`` is
+ *                      applied to every non-zero MO bracket. Each non-zero year
+ *                      gets its own period; the final year in REFORM_YEARS has
+ *                      its end date extended to 2100.
  *   - top_cap:         `yearParams[Y]` is the top-rate cap in [0, 0.047] for
  *                      year Y. Every bracket whose 2025 rate exceeds the cap
  *                      is reduced to the cap in that year.
@@ -65,9 +68,9 @@ export function buildReform(
       const periods: Record<string, number> = {};
       for (let idx = 0; idx < REFORM_YEARS.length; idx++) {
         const year = REFORM_YEARS[idx];
-        const cut = yearParams[year] ?? 0;
-        if (cut === 0) continue; // Skip baseline years.
-        const newRate = MO_2025_RATES[i] * (1 - cut);
+        const ppReduction = yearParams[year] ?? 0;
+        if (ppReduction === 0) continue; // Skip baseline years.
+        const newRate = Math.max(0, MO_2025_RATES[i] - ppReduction);
         const isLast = idx === REFORM_YEARS.length - 1;
         const end = isLast ? FINAL_END : `${year}-12-31`;
         periods[`${year}-01-01.${end}`] = newRate;
