@@ -129,6 +129,25 @@ export default function StateImpact({ years, running }: Props) {
         </div>
       )}
 
+      {!running &&
+        (() => {
+          const erroredYears = years.filter((y) => y.status === 'error');
+          if (erroredYears.length === 0) return null;
+          return (
+            <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+              <p className="font-medium mb-1">
+                The PolicyEngine API could not simulate{' '}
+                {erroredYears.length} of {total} years (
+                {erroredYears.map((y) => y.year).join(', ')}).
+              </p>
+              <p className="text-xs text-yellow-700">
+                Late-year microsimulations sometimes time out on the hosted
+                API; the chart and totals show only the years that completed.
+              </p>
+            </div>
+          );
+        })()}
+
       {/* Summary card */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="rounded-lg border border-gray-200 bg-white p-6">
