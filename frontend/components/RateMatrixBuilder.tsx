@@ -32,6 +32,9 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
   const [ppEnd, setPpEnd] = useState(1.5);
   const [ppStartYear, setPpStartYear] = useState(2027);
   const [ppEndYear, setPpEndYear] = useState(2035);
+  // Full-elimination start year. Years strictly before this are left
+  // untouched; this year and every later year are zeroed.
+  const [eliminateStartYear, setEliminateStartYear] = useState(2027);
 
   // Indices 1..7 are the non-zero brackets we let users edit; index 0 is
   // always 0% (the standard-deduction band) and is hidden.
@@ -53,10 +56,12 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
     onChange(next);
   };
 
-  /** Set every editable cell to 0. */
+  /** Zero every editable cell from eliminateStartYear onward. Years
+   * strictly before the start year are left untouched. */
   const applyFullElimination = () => {
     const next = cloneMatrix();
     for (const y of REFORM_YEARS) {
+      if (y < eliminateStartYear) continue;
       for (const i of editableBrackets) next[y][i] = 0;
     }
     onChange(next);
@@ -177,14 +182,19 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
         </ActionRow>
         <ActionRow
           title="Full elimination"
-          description="Set every bracket rate to 0% for every year 2027–2035."
+          description="Zero every bracket rate from the chosen year onward; earlier years are left untouched."
         >
+          <span className="text-xs text-gray-500">Starting in</span>
+          <YearSelect
+            value={eliminateStartYear}
+            onChange={setEliminateStartYear}
+          />
           <button
             type="button"
             onClick={applyFullElimination}
             className={btnPrimary}
           >
-            Zero out every cell
+            Apply
           </button>
         </ActionRow>
         <ActionRow
