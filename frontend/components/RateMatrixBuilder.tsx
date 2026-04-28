@@ -269,14 +269,12 @@ function ActionRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900">{title}</div>
-          <div className="text-xs text-gray-500 mt-0.5">{description}</div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">{children}</div>
+    <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+      <div>
+        <div className="text-sm font-semibold text-gray-900">{title}</div>
+        <div className="text-xs text-gray-500 mt-0.5">{description}</div>
       </div>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }
