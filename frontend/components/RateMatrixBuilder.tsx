@@ -19,13 +19,17 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
   // Top-rate cap inputs. The cap is interpolated linearly from
   // (capStartYear, capStart) to (capEndYear, capEnd). To apply a single
   // uniform cap across all years, set capStart == capEnd.
-  const [capStart, setCapStart] = useState(3.0);
+  // Defaults pin the cap at Missouri's current top rate (4.7%) in 2027,
+  // making "Apply" a no-op until the user lowers the start value or
+  // edits the end-year cap.
+  const [capStart, setCapStart] = useState(4.7);
   const [capEnd, setCapEnd] = useState(3.0);
   const [capStartYear, setCapStartYear] = useState(2027);
   const [capEndYear, setCapEndYear] = useState(2035);
   // Percentage-point cut inputs (same shape as the cap).
-  const [ppStart, setPpStart] = useState(1.0);
-  const [ppEnd, setPpEnd] = useState(1.0);
+  // Defaults: 0 pp in 2027 ramping to 1.5 pp in 2035.
+  const [ppStart, setPpStart] = useState(0);
+  const [ppEnd, setPpEnd] = useState(1.5);
   const [ppStartYear, setPpStartYear] = useState(2027);
   const [ppEndYear, setPpEndYear] = useState(2035);
 
