@@ -16,20 +16,18 @@ interface Props {
  * percentage-point cut, or full elimination across the whole matrix.
  */
 export default function RateMatrixBuilder({ customRates, onChange }: Props) {
-  const [capPct, setCapPct] = useState(3.0);
-  const [ppCut, setPpCut] = useState(1.0);
-  // Ramp inputs: linear interpolation between (rampStartYear, startValue)
-  // and (rampEndYear, endValue). Years before rampStartYear are left at
-  // their current matrix value; years after rampEndYear are held at the
-  // ramp's end value.
-  const [capRampStart, setCapRampStart] = useState(4.0);
-  const [capRampEnd, setCapRampEnd] = useState(2.0);
-  const [capRampStartYear, setCapRampStartYear] = useState(2027);
-  const [capRampEndYear, setCapRampEndYear] = useState(2035);
-  const [ppRampStart, setPpRampStart] = useState(0.5);
-  const [ppRampEnd, setPpRampEnd] = useState(2.5);
-  const [ppRampStartYear, setPpRampStartYear] = useState(2027);
-  const [ppRampEndYear, setPpRampEndYear] = useState(2035);
+  // Top-rate cap inputs. The cap is interpolated linearly from
+  // (capStartYear, capStart) to (capEndYear, capEnd). To apply a single
+  // uniform cap across all years, set capStart == capEnd.
+  const [capStart, setCapStart] = useState(3.0);
+  const [capEnd, setCapEnd] = useState(3.0);
+  const [capStartYear, setCapStartYear] = useState(2027);
+  const [capEndYear, setCapEndYear] = useState(2035);
+  // Percentage-point cut inputs (same shape as the cap).
+  const [ppStart, setPpStart] = useState(1.0);
+  const [ppEnd, setPpEnd] = useState(1.0);
+  const [ppStartYear, setPpStartYear] = useState(2027);
+  const [ppEndYear, setPpEndYear] = useState(2035);
 
   // Indices 1..7 are the non-zero brackets we let users edit; index 0 is
   // always 0% (the standard-deduction band) and is hidden.
@@ -51,30 +49,6 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
     onChange(next);
   };
 
-  /** Top-rate cap: any cell whose current rate exceeds the cap drops to it. */
-  const applyTopCap = () => {
-    const cap = Math.max(0, Math.min(10, capPct)) / 100;
-    const next = cloneMatrix();
-    for (const y of REFORM_YEARS) {
-      for (const i of editableBrackets) {
-        if (next[y][i] > cap) next[y][i] = cap;
-      }
-    }
-    onChange(next);
-  };
-
-  /** Subtract a flat pp from every editable cell, clamped at 0. */
-  const applyPpCut = () => {
-    const pp = Math.max(0, Math.min(10, ppCut)) / 100;
-    const next = cloneMatrix();
-    for (const y of REFORM_YEARS) {
-      for (const i of editableBrackets) {
-        next[y][i] = Math.max(0, next[y][i] - pp);
-      }
-    }
-    onChange(next);
-  };
-
   /** Set every editable cell to 0. */
   const applyFullElimination = () => {
     const next = cloneMatrix();
@@ -85,10 +59,10 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
   };
 
   /**
-   * For a year y, return the linearly-interpolated ramp value given
-   * (startYear, startValue) and (endYear, endValue). Values at or before
-   * startYear return startValue; values at or after endYear return
-   * endValue; years between are interpolated.
+   * For a year y, return the linearly-interpolated value given
+   * (startYear, startValue) and (endYear, endValue). Years before the
+   * earliest endpoint return that endpoint's value; years after the
+   * latest endpoint return that endpoint's value.
    */
   const interpolateRamp = (
     y: number,
@@ -97,6 +71,7 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
     startValue: number,
     endValue: number,
   ): number => {
+    if (startYear === endYear) return startValue;
     const a = Math.min(startYear, endYear);
     const b = Math.max(startYear, endYear);
     if (y <= a) return startYear <= endYear ? startValue : endValue;
@@ -105,20 +80,20 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
     return startValue + (endValue - startValue) * t;
   };
 
-  /** Top-rate cap, applied as a yearly ramp. Cells inside the ramp window
-   * whose rate exceeds the year's cap drop to it; outside the window, the
-   * cap is held at the start value (before) or end value (after). */
-  const applyCapRamp = () => {
+  /** Top-rate cap. The cap is linearly interpolated between the start
+   * year/value and the end year/value; for each year, every cell whose
+   * current rate exceeds that year's cap drops to it. Years strictly
+   * before capStartYear are left untouched. */
+  const applyTopCap = () => {
     const next = cloneMatrix();
     for (const y of REFORM_YEARS) {
-      // Years strictly before the ramp start are left untouched.
-      if (y < capRampStartYear) continue;
+      if (y < capStartYear) continue;
       const capPctY = interpolateRamp(
         y,
-        capRampStartYear,
-        capRampEndYear,
-        capRampStart,
-        capRampEnd,
+        capStartYear,
+        capEndYear,
+        capStart,
+        capEnd,
       );
       const cap = Math.max(0, Math.min(10, capPctY)) / 100;
       for (const i of editableBrackets) {
@@ -128,17 +103,20 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
     onChange(next);
   };
 
-  /** Percentage-point cut, applied as a yearly ramp. */
-  const applyPpRamp = () => {
+  /** Percentage-point cut. The pp amount is linearly interpolated between
+   * the start year/value and the end year/value; for each year, every
+   * cell decreases by that year's interpolated pp amount, floored at 0.
+   * Years strictly before ppStartYear are left untouched. */
+  const applyPpCut = () => {
     const next = cloneMatrix();
     for (const y of REFORM_YEARS) {
-      if (y < ppRampStartYear) continue;
+      if (y < ppStartYear) continue;
       const ppY = interpolateRamp(
         y,
-        ppRampStartYear,
-        ppRampEndYear,
-        ppRampStart,
-        ppRampEnd,
+        ppStartYear,
+        ppEndYear,
+        ppStart,
+        ppEnd,
       );
       const pp = Math.max(0, Math.min(10, ppY)) / 100;
       for (const i of editableBrackets) {
@@ -169,47 +147,27 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <ActionRow
           title="Top-rate cap"
-          description="Reduce every cell whose rate exceeds the cap to the cap."
+          description="Cap rates between two years. Set start cap = end cap for a uniform cap; otherwise the cap is linearly interpolated. Years before the start year are left untouched."
         >
-          <span className="text-xs text-gray-500">Cap at</span>
-          <PctInput value={capPct} onChange={setCapPct} max={4.7} />
+          <YearSelect value={capStartYear} onChange={setCapStartYear} />
+          <PctInput value={capStart} onChange={setCapStart} max={4.7} />
+          <span className="text-xs text-gray-500">→</span>
+          <YearSelect value={capEndYear} onChange={setCapEndYear} />
+          <PctInput value={capEnd} onChange={setCapEnd} max={4.7} />
           <button type="button" onClick={applyTopCap} className={btnPrimary}>
             Apply
           </button>
         </ActionRow>
         <ActionRow
           title="Percentage-point cut"
-          description="Subtract a flat pp from every cell; rates floor at 0%."
+          description="Subtract pp between two years. Set start pp = end pp for a uniform cut; otherwise the cut is linearly interpolated. Years before the start year are left untouched."
         >
-          <span className="text-xs text-gray-500">Subtract</span>
-          <PctInput value={ppCut} onChange={setPpCut} max={4.7} suffix="pp" />
+          <YearSelect value={ppStartYear} onChange={setPpStartYear} />
+          <PctInput value={ppStart} onChange={setPpStart} max={4.7} suffix="pp" />
+          <span className="text-xs text-gray-500">→</span>
+          <YearSelect value={ppEndYear} onChange={setPpEndYear} />
+          <PctInput value={ppEnd} onChange={setPpEnd} max={4.7} suffix="pp" />
           <button type="button" onClick={applyPpCut} className={btnPrimary}>
-            Apply
-          </button>
-        </ActionRow>
-        <ActionRow
-          title="Top-rate cap ramp"
-          description="Linearly ramp the cap between two years. Years before the start year are left untouched."
-        >
-          <YearSelect value={capRampStartYear} onChange={setCapRampStartYear} />
-          <PctInput value={capRampStart} onChange={setCapRampStart} max={4.7} />
-          <span className="text-xs text-gray-500">→</span>
-          <YearSelect value={capRampEndYear} onChange={setCapRampEndYear} />
-          <PctInput value={capRampEnd} onChange={setCapRampEnd} max={4.7} />
-          <button type="button" onClick={applyCapRamp} className={btnPrimary}>
-            Apply
-          </button>
-        </ActionRow>
-        <ActionRow
-          title="Percentage-point cut ramp"
-          description="Linearly ramp the pp reduction between two years. Years before the start year are left untouched."
-        >
-          <YearSelect value={ppRampStartYear} onChange={setPpRampStartYear} />
-          <PctInput value={ppRampStart} onChange={setPpRampStart} max={4.7} suffix="pp" />
-          <span className="text-xs text-gray-500">→</span>
-          <YearSelect value={ppRampEndYear} onChange={setPpRampEndYear} />
-          <PctInput value={ppRampEnd} onChange={setPpRampEnd} max={4.7} suffix="pp" />
-          <button type="button" onClick={applyPpRamp} className={btnPrimary}>
             Apply
           </button>
         </ActionRow>
