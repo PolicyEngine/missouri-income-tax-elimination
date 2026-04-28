@@ -133,17 +133,38 @@ export default function StateImpact({ years, running }: Props) {
         (() => {
           const erroredYears = years.filter((y) => y.status === 'error');
           if (erroredYears.length === 0) return null;
+          const allFailed = erroredYears.length === total;
           return (
             <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
-              <p className="font-medium mb-1">
-                The PolicyEngine API could not simulate{' '}
-                {erroredYears.length} of {total} years (
-                {erroredYears.map((y) => y.year).join(', ')}).
-              </p>
-              <p className="text-xs text-yellow-700">
-                Late-year microsimulations sometimes time out on the hosted
-                API; the chart and totals show only the years that completed.
-              </p>
+              {allFailed ? (
+                <>
+                  <p className="font-medium mb-1">
+                    The PolicyEngine API is currently unavailable for
+                    state-level Missouri simulations.
+                  </p>
+                  <p className="text-xs text-yellow-700">
+                    Every year ({erroredYears[0].year}&ndash;
+                    {erroredYears[erroredYears.length - 1].year}) failed
+                    immediately, which usually means the upstream simulation
+                    gateway is down. This isn&apos;t fixable from this
+                    dashboard &mdash; please retry in a few minutes, or check
+                    PolicyEngine API status.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium mb-1">
+                    The PolicyEngine API could not simulate{' '}
+                    {erroredYears.length} of {total} years (
+                    {erroredYears.map((y) => y.year).join(', ')}).
+                  </p>
+                  <p className="text-xs text-yellow-700">
+                    Late-year microsimulations sometimes time out on the
+                    hosted API; the chart and totals show only the years that
+                    completed.
+                  </p>
+                </>
+              )}
             </div>
           );
         })()}
