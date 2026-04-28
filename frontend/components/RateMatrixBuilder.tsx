@@ -18,6 +18,18 @@ interface Props {
 export default function RateMatrixBuilder({ customRates, onChange }: Props) {
   const [capPct, setCapPct] = useState(3.0);
   const [ppCut, setPpCut] = useState(1.0);
+  // Ramp inputs: linear interpolation between (rampStartYear, startValue)
+  // and (rampEndYear, endValue). Years before rampStartYear are left at
+  // their current matrix value; years after rampEndYear are held at the
+  // ramp's end value.
+  const [capRampStart, setCapRampStart] = useState(4.0);
+  const [capRampEnd, setCapRampEnd] = useState(2.0);
+  const [capRampStartYear, setCapRampStartYear] = useState(2027);
+  const [capRampEndYear, setCapRampEndYear] = useState(2035);
+  const [ppRampStart, setPpRampStart] = useState(0.5);
+  const [ppRampEnd, setPpRampEnd] = useState(2.5);
+  const [ppRampStartYear, setPpRampStartYear] = useState(2027);
+  const [ppRampEndYear, setPpRampEndYear] = useState(2035);
 
   // Indices 1..7 are the non-zero brackets we let users edit; index 0 is
   // always 0% (the standard-deduction band) and is hidden.
@@ -72,6 +84,70 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
     onChange(next);
   };
 
+  /**
+   * For a year y, return the linearly-interpolated ramp value given
+   * (startYear, startValue) and (endYear, endValue). Values at or before
+   * startYear return startValue; values at or after endYear return
+   * endValue; years between are interpolated.
+   */
+  const interpolateRamp = (
+    y: number,
+    startYear: number,
+    endYear: number,
+    startValue: number,
+    endValue: number,
+  ): number => {
+    const a = Math.min(startYear, endYear);
+    const b = Math.max(startYear, endYear);
+    if (y <= a) return startYear <= endYear ? startValue : endValue;
+    if (y >= b) return startYear <= endYear ? endValue : startValue;
+    const t = (y - startYear) / (endYear - startYear);
+    return startValue + (endValue - startValue) * t;
+  };
+
+  /** Top-rate cap, applied as a yearly ramp. Cells inside the ramp window
+   * whose rate exceeds the year's cap drop to it; outside the window, the
+   * cap is held at the start value (before) or end value (after). */
+  const applyCapRamp = () => {
+    const next = cloneMatrix();
+    for (const y of REFORM_YEARS) {
+      // Years strictly before the ramp start are left untouched.
+      if (y < capRampStartYear) continue;
+      const capPctY = interpolateRamp(
+        y,
+        capRampStartYear,
+        capRampEndYear,
+        capRampStart,
+        capRampEnd,
+      );
+      const cap = Math.max(0, Math.min(10, capPctY)) / 100;
+      for (const i of editableBrackets) {
+        if (next[y][i] > cap) next[y][i] = cap;
+      }
+    }
+    onChange(next);
+  };
+
+  /** Percentage-point cut, applied as a yearly ramp. */
+  const applyPpRamp = () => {
+    const next = cloneMatrix();
+    for (const y of REFORM_YEARS) {
+      if (y < ppRampStartYear) continue;
+      const ppY = interpolateRamp(
+        y,
+        ppRampStartYear,
+        ppRampEndYear,
+        ppRampStart,
+        ppRampEnd,
+      );
+      const pp = Math.max(0, Math.min(10, ppY)) / 100;
+      for (const i of editableBrackets) {
+        next[y][i] = Math.max(0, next[y][i] - pp);
+      }
+    }
+    onChange(next);
+  };
+
   /** Restore every cell to MO_2025_RATES. */
   const reset = () => onChange(defaultCustomRates());
 
@@ -108,6 +184,32 @@ export default function RateMatrixBuilder({ customRates, onChange }: Props) {
           <span className="text-xs text-gray-500">Subtract</span>
           <PctInput value={ppCut} onChange={setPpCut} max={4.7} suffix="pp" />
           <button type="button" onClick={applyPpCut} className={btnPrimary}>
+            Apply
+          </button>
+        </ActionRow>
+        <ActionRow
+          title="Top-rate cap ramp"
+          description="Linearly ramp the cap between two years. Years before the start year are left untouched."
+        >
+          <YearSelect value={capRampStartYear} onChange={setCapRampStartYear} />
+          <PctInput value={capRampStart} onChange={setCapRampStart} max={4.7} />
+          <span className="text-xs text-gray-500">→</span>
+          <YearSelect value={capRampEndYear} onChange={setCapRampEndYear} />
+          <PctInput value={capRampEnd} onChange={setCapRampEnd} max={4.7} />
+          <button type="button" onClick={applyCapRamp} className={btnPrimary}>
+            Apply
+          </button>
+        </ActionRow>
+        <ActionRow
+          title="Percentage-point cut ramp"
+          description="Linearly ramp the pp reduction between two years. Years before the start year are left untouched."
+        >
+          <YearSelect value={ppRampStartYear} onChange={setPpRampStartYear} />
+          <PctInput value={ppRampStart} onChange={setPpRampStart} max={4.7} suffix="pp" />
+          <span className="text-xs text-gray-500">→</span>
+          <YearSelect value={ppRampEndYear} onChange={setPpRampEndYear} />
+          <PctInput value={ppRampEnd} onChange={setPpRampEnd} max={4.7} suffix="pp" />
+          <button type="button" onClick={applyPpRamp} className={btnPrimary}>
             Apply
           </button>
         </ActionRow>
@@ -218,6 +320,29 @@ function ActionRow({
         <div className="flex items-center gap-2 shrink-0">{children}</div>
       </div>
     </div>
+  );
+}
+
+function YearSelect({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="px-1.5 py-1 bg-white border border-gray-200 rounded text-xs text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+      aria-label="Ramp year"
+    >
+      {REFORM_YEARS.map((y) => (
+        <option key={y} value={y}>
+          {y}
+        </option>
+      ))}
+    </select>
   );
 }
 
