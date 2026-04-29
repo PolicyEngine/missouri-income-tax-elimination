@@ -15,6 +15,25 @@ const YEARS = [
   2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035,
 ] as const;
 
+// Each household-impact call hits /us/calculate twice (baseline + reform),
+// so cap concurrency to keep the API from aborting requests under load.
+const HOUSEHOLD_CONCURRENCY = 3;
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      await worker(items[i]);
+    }
+  });
+  await Promise.all(runners);
+}
+
 export function useMultiYearHouseholdImpact() {
   const [years, setYears] = useState<YearHouseholdImpact[]>([]);
   const [running, setRunning] = useState(false);
@@ -29,32 +48,30 @@ export function useMultiYearHouseholdImpact() {
         YEARS.map((y) => ({ year: y, status: 'computing' as const })),
       );
 
-      // Run all years in parallel. Each year's setState fires as its
-      // simulation finishes, so the chart streams in progressively.
-      await Promise.all(
-        YEARS.map(async (y) => {
-          try {
-            const data = await api.calculateHouseholdImpact(
-              { ...baseRequest, year: y },
-              reform,
-            );
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y ? { year: y, status: 'ok', data } : p,
-              ),
-            );
-          } catch (e) {
-            const message = e instanceof Error ? e.message : 'Unknown error';
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y
-                  ? { year: y, status: 'error', error: message }
-                  : p,
-              ),
-            );
-          }
-        }),
-      );
+      // Fan out years with bounded concurrency. Each year's setState fires
+      // as its simulation finishes so the chart streams in progressively.
+      await runWithConcurrency(YEARS, HOUSEHOLD_CONCURRENCY, async (y) => {
+        try {
+          const data = await api.calculateHouseholdImpact(
+            { ...baseRequest, year: y },
+            reform,
+          );
+          setYears((prev) =>
+            prev.map((p) =>
+              p.year === y ? { year: y, status: 'ok', data } : p,
+            ),
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Unknown error';
+          setYears((prev) =>
+            prev.map((p) =>
+              p.year === y
+                ? { year: y, status: 'error', error: message }
+                : p,
+            ),
+          );
+        }
+      });
 
       setRunning(false);
     },

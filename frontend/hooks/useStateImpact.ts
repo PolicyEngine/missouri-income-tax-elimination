@@ -15,6 +15,25 @@ const YEARS = [
   2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035,
 ] as const;
 
+// Cap simultaneous /us/economy polls so the API doesn't abort requests
+// under load.
+const STATE_CONCURRENCY = 3;
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      await worker(items[i]);
+    }
+  });
+  await Promise.all(runners);
+}
+
 export function useStateImpact() {
   const [years, setYears] = useState<YearImpact[]>([]);
   const [running, setRunning] = useState(false);
@@ -34,48 +53,46 @@ export function useStateImpact() {
 
       try {
         const policyId = await createPolicy(reform);
-        // Mark all as computing up front, then poll all years in parallel.
-        // Each year's setState fires independently as its simulation
-        // finishes, so results stream in progressively.
+        // Mark all as computing up front, then poll years with bounded
+        // concurrency. Each year's setState fires independently as its
+        // simulation finishes, so results stream in progressively.
         setYears((prev) =>
           prev.map((p) => ({ ...p, status: 'computing' as const })),
         );
-        await Promise.all(
-          YEARS.map(async (y) => {
+        await runWithConcurrency(YEARS, STATE_CONCURRENCY, async (y) => {
+          if (controller.signal.aborted) return;
+          try {
+            const result = await pollEconomicImpact(
+              policyId,
+              y,
+              undefined,
+              controller.signal,
+            );
             if (controller.signal.aborted) return;
-            try {
-              const result = await pollEconomicImpact(
-                policyId,
-                y,
-                undefined,
-                controller.signal,
-              );
-              if (controller.signal.aborted) return;
-              setYears((prev) =>
-                prev.map((p) =>
-                  p.year === y
-                    ? {
-                        year: y,
-                        status: 'ok',
-                        budget: result.budget as BudgetImpact,
-                      }
-                    : p,
-                ),
-              );
-            } catch (e) {
-              if (controller.signal.aborted) return;
-              const message =
-                e instanceof Error ? e.message : 'Unknown error';
-              setYears((prev) =>
-                prev.map((p) =>
-                  p.year === y
-                    ? { year: y, status: 'error', error: message }
-                    : p,
-                ),
-              );
-            }
-          }),
-        );
+            setYears((prev) =>
+              prev.map((p) =>
+                p.year === y
+                  ? {
+                      year: y,
+                      status: 'ok',
+                      budget: result.budget as BudgetImpact,
+                    }
+                  : p,
+              ),
+            );
+          } catch (e) {
+            if (controller.signal.aborted) return;
+            const message =
+              e instanceof Error ? e.message : 'Unknown error';
+            setYears((prev) =>
+              prev.map((p) =>
+                p.year === y
+                  ? { year: y, status: 'error', error: message }
+                  : p,
+              ),
+            );
+          }
+        });
       } catch (e) {
         // createPolicy failed — mark everything as error.
         const message = e instanceof Error ? e.message : 'Unknown error';
