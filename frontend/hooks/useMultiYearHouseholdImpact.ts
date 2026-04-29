@@ -25,39 +25,36 @@ export function useMultiYearHouseholdImpact() {
       reform: Record<string, Record<string, number | boolean>> = {},
     ) => {
       setRunning(true);
-      setYears(YEARS.map((y) => ({ year: y, status: 'pending' })));
+      setYears(
+        YEARS.map((y) => ({ year: y, status: 'computing' as const })),
+      );
 
-      // Sequential: the PolicyEngine API aborts / rate-limits when hit with
-      // 9 parallel household requests, and the first 4-5 succeed before the
-      // rest get cancelled. Running in order is slower overall (~15-20 s)
-      // but reliable and shows results progressively as each finishes.
-      for (const y of YEARS) {
-        setYears((prev) =>
-          prev.map((p) =>
-            p.year === y ? { ...p, status: 'computing' } : p,
-          ),
-        );
-        try {
-          const data = await api.calculateHouseholdImpact(
-            { ...baseRequest, year: y },
-            reform,
-          );
-          setYears((prev) =>
-            prev.map((p) =>
-              p.year === y ? { year: y, status: 'ok', data } : p,
-            ),
-          );
-        } catch (e) {
-          const message = e instanceof Error ? e.message : 'Unknown error';
-          setYears((prev) =>
-            prev.map((p) =>
-              p.year === y
-                ? { year: y, status: 'error', error: message }
-                : p,
-            ),
-          );
-        }
-      }
+      // Run all years in parallel. Each year's setState fires as its
+      // simulation finishes, so the chart streams in progressively.
+      await Promise.all(
+        YEARS.map(async (y) => {
+          try {
+            const data = await api.calculateHouseholdImpact(
+              { ...baseRequest, year: y },
+              reform,
+            );
+            setYears((prev) =>
+              prev.map((p) =>
+                p.year === y ? { year: y, status: 'ok', data } : p,
+              ),
+            );
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Unknown error';
+            setYears((prev) =>
+              prev.map((p) =>
+                p.year === y
+                  ? { year: y, status: 'error', error: message }
+                  : p,
+              ),
+            );
+          }
+        }),
+      );
 
       setRunning(false);
     },

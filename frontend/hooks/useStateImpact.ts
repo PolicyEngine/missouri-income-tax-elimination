@@ -34,47 +34,48 @@ export function useStateImpact() {
 
       try {
         const policyId = await createPolicy(reform);
-        // Run years sequentially so each result appears as soon as its
-        // simulation finishes, and we don't hammer the API with 9 parallel
-        // requests that stall each other.
-        for (const y of YEARS) {
-          if (controller.signal.aborted) break;
-          setYears((prev) =>
-            prev.map((p) =>
-              p.year === y ? { ...p, status: 'computing' } : p,
-            ),
-          );
-          try {
-            const result = await pollEconomicImpact(
-              policyId,
-              y,
-              undefined,
-              controller.signal,
-            );
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y
-                  ? {
-                      year: y,
-                      status: 'ok',
-                      budget: result.budget as BudgetImpact,
-                    }
-                  : p,
-              ),
-            );
-          } catch (e) {
-            if (controller.signal.aborted) break;
-            const message =
-              e instanceof Error ? e.message : 'Unknown error';
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y
-                  ? { year: y, status: 'error', error: message }
-                  : p,
-              ),
-            );
-          }
-        }
+        // Mark all as computing up front, then poll all years in parallel.
+        // Each year's setState fires independently as its simulation
+        // finishes, so results stream in progressively.
+        setYears((prev) =>
+          prev.map((p) => ({ ...p, status: 'computing' as const })),
+        );
+        await Promise.all(
+          YEARS.map(async (y) => {
+            if (controller.signal.aborted) return;
+            try {
+              const result = await pollEconomicImpact(
+                policyId,
+                y,
+                undefined,
+                controller.signal,
+              );
+              if (controller.signal.aborted) return;
+              setYears((prev) =>
+                prev.map((p) =>
+                  p.year === y
+                    ? {
+                        year: y,
+                        status: 'ok',
+                        budget: result.budget as BudgetImpact,
+                      }
+                    : p,
+                ),
+              );
+            } catch (e) {
+              if (controller.signal.aborted) return;
+              const message =
+                e instanceof Error ? e.message : 'Unknown error';
+              setYears((prev) =>
+                prev.map((p) =>
+                  p.year === y
+                    ? { year: y, status: 'error', error: message }
+                    : p,
+                ),
+              );
+            }
+          }),
+        );
       } catch (e) {
         // createPolicy failed — mark everything as error.
         const message = e instanceof Error ? e.message : 'Unknown error';
