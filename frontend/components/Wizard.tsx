@@ -93,7 +93,9 @@ interface StepDef {
 const STEPS: StepDef[] = [
   { id: 'intro', showFor: () => true },
   { id: 'path', showFor: () => true },
-  { id: 'ramp', showFor: (p) => p === 'cap' || p === 'cut' || p === 'eliminate' },
+  // Cap folds years + rates onto the magnitude step. Cut and eliminate
+  // keep ramp (years) separate from magnitude.
+  { id: 'ramp', showFor: (p) => p === 'cut' || p === 'eliminate' },
   { id: 'magnitude', showFor: (p) => p === 'cap' || p === 'cut' },
   { id: 'household', showFor: () => true },
   { id: 'review', showFor: () => true },
@@ -384,20 +386,33 @@ export default function Wizard({
             <StepShell
               stepIndex={clampedStep}
               totalSteps={steps.length}
-              title="What's the cap?"
-              subtitle="Set the top marginal rate at the start year and the end year. The cap is interpolated linearly between."
+              title="Set the cap"
+              subtitle="Pick the start and end year and the top marginal rate at each. The cap is interpolated linearly between."
             >
-              <div className="space-y-4 rounded-2xl border border-gray-200 bg-white px-5 py-4">
-                <div className="flex items-center gap-3 text-sm text-gray-700">
-                  <span className="w-28 font-medium">{config.cap.startYear} cap</span>
+              <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
+                <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
+                  <span></span>
+                  <span>Year</span>
+                  <span>Cap</span>
+                </div>
+                <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
+                  <span className="font-medium">Start</span>
+                  <YearSelect
+                    value={config.cap.startYear}
+                    onChange={(v) => updateCap({ startYear: v })}
+                  />
                   <PctInput
                     value={config.cap.startPct}
                     onChange={(v) => updateCap({ startPct: v })}
                     max={4.7}
                   />
                 </div>
-                <div className="flex items-center gap-3 text-sm text-gray-700">
-                  <span className="w-28 font-medium">{config.cap.endYear} cap</span>
+                <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
+                  <span className="font-medium">End</span>
+                  <YearSelect
+                    value={config.cap.endYear}
+                    onChange={(v) => updateCap({ endYear: v })}
+                  />
                   <PctInput
                     value={config.cap.endPct}
                     onChange={(v) => updateCap({ endPct: v })}
@@ -407,6 +422,7 @@ export default function Wizard({
                 <p className="text-xs leading-5 text-gray-500">
                   Cells whose current rate exceeds that year&apos;s cap drop
                   to it. Cells already at or below the cap are unaffected.
+                  Years before the start year are unchanged.
                 </p>
               </div>
             </StepShell>
