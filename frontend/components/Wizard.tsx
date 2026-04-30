@@ -76,6 +76,9 @@ interface Props {
   /** Fires from the household step's Skip button — parent sets
    * skipHousehold and the wizard advances to review. */
   onSkipHousehold: () => void;
+  /** Whether the household calc has been skipped — surfaced on the
+   * review step. */
+  householdSkipped: boolean;
 }
 
 const STEP_IDS = [
@@ -256,6 +259,7 @@ export default function Wizard({
   onShowResults,
   onDone,
   onSkipHousehold,
+  householdSkipped,
 }: Props) {
   const [step, setStep] = useState(0);
   const steps = useMemo(() => visibleSteps(path), [path]);
@@ -645,11 +649,9 @@ export default function Wizard({
                 </p>
               )}
               <p className="pt-2 text-xs text-gray-500">
-                Household: ${household.income.toLocaleString('en-US')},
-                age {household.age},{' '}
-                {household.married ? 'married' : 'single'},{' '}
-                {household.dependents.length}{' '}
-                {household.dependents.length === 1 ? 'dependent' : 'dependents'}.
+                {householdSkipped
+                  ? 'Household calculation skipped — only the statewide revenue impact will run.'
+                  : `Household: $${household.income.toLocaleString('en-US')}, age ${household.age}, ${household.married ? 'married' : 'single'}, ${household.dependents.length} ${household.dependents.length === 1 ? 'dependent' : 'dependents'}.`}
               </p>
             </div>
           </StepShell>

@@ -289,6 +289,7 @@ function ReformImpactTab() {
             onShowResults={() => setShowResults(true)}
             onDone={handleDone}
             onSkipHousehold={() => setSkipHousehold(true)}
+            householdSkipped={skipHousehold}
           />
 
           {/* Custom matrix only surfaces when the user picks the custom
