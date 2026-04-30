@@ -193,3 +193,72 @@ export function defaultCustomRates(): Record<number, number[]> {
   for (const y of REFORM_YEARS) out[y] = [...MO_2025_RATES];
   return out;
 }
+
+/** Linearly interpolate between two (year, value) endpoints. Clamps to the
+ * closer endpoint outside the range. */
+function interpolateRamp(
+  y: number,
+  startYear: number,
+  endYear: number,
+  startValue: number,
+  endValue: number,
+): number {
+  if (startYear === endYear) return startValue;
+  const a = Math.min(startYear, endYear);
+  const b = Math.max(startYear, endYear);
+  if (y <= a) return startYear <= endYear ? startValue : endValue;
+  if (y >= b) return startYear <= endYear ? endValue : startValue;
+  const t = (y - startYear) / (endYear - startYear);
+  return startValue + (endValue - startValue) * t;
+}
+
+/** Build a year × bracket rates matrix for the top-rate cap path. */
+export function buildCapRates(
+  startYear: number,
+  endYear: number,
+  startPct: number,
+  endPct: number,
+): Record<number, number[]> {
+  const out = defaultCustomRates();
+  for (const y of REFORM_YEARS) {
+    if (y < startYear) continue;
+    const capPctY = interpolateRamp(y, startYear, endYear, startPct, endPct);
+    const cap = Math.max(0, Math.min(10, capPctY)) / 100;
+    for (let i = 1; i < out[y].length; i++) {
+      if (out[y][i] > cap) out[y][i] = cap;
+    }
+  }
+  return out;
+}
+
+/** Build a year × bracket rates matrix for the percentage-point cut path. */
+export function buildPpRates(
+  startYear: number,
+  endYear: number,
+  startPp: number,
+  endPp: number,
+): Record<number, number[]> {
+  const out = defaultCustomRates();
+  for (const y of REFORM_YEARS) {
+    if (y < startYear) continue;
+    const ppY = interpolateRamp(y, startYear, endYear, startPp, endPp);
+    const pp = Math.max(0, Math.min(10, ppY)) / 100;
+    for (let i = 1; i < out[y].length; i++) {
+      out[y][i] = Math.max(0, out[y][i] - pp);
+    }
+  }
+  return out;
+}
+
+/** Build a year × bracket rates matrix that zeroes every editable bracket
+ * from `startYear` onward. */
+export function buildEliminateRates(
+  startYear: number,
+): Record<number, number[]> {
+  const out = defaultCustomRates();
+  for (const y of REFORM_YEARS) {
+    if (y < startYear) continue;
+    for (let i = 1; i < out[y].length; i++) out[y][i] = 0;
+  }
+  return out;
+}

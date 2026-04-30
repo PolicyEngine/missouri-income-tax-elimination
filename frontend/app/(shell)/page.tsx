@@ -1,15 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ImpactAnalysis from '@/components/ImpactAnalysis';
 import PolicyOverview from '@/components/PolicyOverview';
 import RateMatrixBuilder from '@/components/RateMatrixBuilder';
 import StateImpact from '@/components/StateImpact';
+import Wizard, {
+  DEFAULT_REFORM_CONFIG,
+  type HouseholdProfile,
+  type ReformConfig,
+  type ReformPath,
+} from '@/components/Wizard';
 import { useStateImpact } from '@/hooks/useStateImpact';
 import { useMultiYearHouseholdImpact } from '@/hooks/useMultiYearHouseholdImpact';
 import type { HouseholdRequest } from '@/lib/types';
 import { parseHashParams } from '@/lib/embedding';
-import { buildReform, defaultCustomRates } from '@/lib/reform';
+import {
+  buildCapRates,
+  buildEliminateRates,
+  buildPpRates,
+  buildReform,
+  defaultCustomRates,
+} from '@/lib/reform';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'policy' | 'impact'>('policy');
@@ -27,19 +39,19 @@ export default function Home() {
     <main className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-primary-500 text-white py-8 px-4 shadow-md">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <h1 className="text-4xl font-bold mb-2">
             Missouri Income Tax Elimination Calculator
           </h1>
           <p className="text-lg opacity-90">
             Explore paths to eliminating Missouri&apos;s individual income tax
-            &mdash; customize a scenario and see household and state impacts
-            over 10 years.
+            &mdash; pick a starting point, dial in the assumptions, and watch
+            the household and state impacts update.
           </p>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Tabs */}
         <div className="flex space-x-1 mb-4" role="tablist">
           {TAB_CONFIG.map((tab) => (
@@ -73,10 +85,41 @@ export default function Home() {
   );
 }
 
-/** Combined Reform + Household Impact tab. */
+/** Convert the wizard's path + config into the year × bracket matrix that
+ * `buildReform('custom', ...)` consumes. The matrix IS the reform. */
+function configToCustomRates(
+  path: ReformPath | null,
+  config: ReformConfig,
+): Record<number, number[]> {
+  if (path === 'cap') {
+    return buildCapRates(
+      config.cap.startYear,
+      config.cap.endYear,
+      config.cap.startPct,
+      config.cap.endPct,
+    );
+  }
+  if (path === 'pp') {
+    return buildPpRates(
+      config.pp.startYear,
+      config.pp.endYear,
+      config.pp.startPp,
+      config.pp.endPp,
+    );
+  }
+  if (path === 'eliminate') {
+    return buildEliminateRates(config.eliminateStartYear);
+  }
+  if (path === 'custom') {
+    return config.customRates;
+  }
+  return defaultCustomRates();
+}
+
+/** Two-column wizard + results layout. */
 function ReformImpactTab() {
   // Initial household values, optionally hydrated from URL hash.
-  const getInitialValues = () => {
+  const initial = useMemo<HouseholdProfile>(() => {
     if (typeof window === 'undefined') {
       return { income: 50000, age: 35, married: false, dependents: [5] };
     }
@@ -87,30 +130,16 @@ function ReformImpactTab() {
       married: params.married ?? false,
       dependents: params.dependents ?? [5],
     };
-  };
+  }, []);
 
-  const initial = getInitialValues();
-
-  const [ageHead, setAgeHead] = useState(initial.age);
-  const [ageHeadRaw, setAgeHeadRaw] = useState(String(initial.age));
-  const [ageSpouse, setAgeSpouse] = useState<number | null>(
-    initial.married ? 35 : null,
-  );
-  const [ageSpouseRaw, setAgeSpouseRaw] = useState('35');
-  const [married, setMarried] = useState(initial.married);
-  const [dependentAges, setDependentAges] = useState<number[]>(initial.dependents);
-  const [income, setIncome] = useState(initial.income);
+  const [household, setHousehold] = useState<HouseholdProfile>(initial);
+  const [path, setPath] = useState<ReformPath | null>(null);
+  const [config, setConfig] = useState<ReformConfig>(DEFAULT_REFORM_CONFIG);
+  const [showResults, setShowResults] = useState(false);
   const [maxEarnings, setMaxEarnings] = useState(200000);
   const [selectedYear, setSelectedYear] = useState(2027);
 
-  // Reform builder state: a 9-year x 8-bracket matrix of rates for 2027-2035.
-  // The matrix IS the reform; serialized via buildReform(type='custom', ...).
-  const [customRates, setCustomRates] = useState<Record<number, number[]>>(() =>
-    defaultCustomRates(),
-  );
-
-  // Submission state.
-  const [triggered, setTriggered] = useState(false);
+  // Submission state — what the running queries are scoped to.
   const [submittedBaseRequest, setSubmittedBaseRequest] = useState<Omit<
     HouseholdRequest,
     'year'
@@ -120,6 +149,7 @@ function ReformImpactTab() {
     Record<string, number | boolean>
   >>({});
   const [skipHousehold, setSkipHousehold] = useState(false);
+  const [triggered, setTriggered] = useState(false);
 
   // 9-year household impact orchestration (2027-2035).
   const {
@@ -137,288 +167,224 @@ function ReformImpactTab() {
     reset: resetStateImpact,
   } = useStateImpact();
 
-  // Keep form in sync with hash changes.
+  // Keep household form in sync with hash changes.
   useEffect(() => {
     const handleHashChange = () => {
       const params = parseHashParams(window.location.hash);
-      if (params.income !== undefined) setIncome(params.income);
-      if (params.age !== undefined) {
-        setAgeHead(params.age);
-        setAgeHeadRaw(String(params.age));
-      }
-      if (params.married !== undefined) {
-        setMarried(params.married);
-        if (params.married) {
-          setAgeSpouse(35);
-          setAgeSpouseRaw('35');
-        } else {
-          setAgeSpouse(null);
-        }
-      }
-      if (params.dependents) setDependentAges(params.dependents);
+      setHousehold((prev) => ({
+        income: params.income ?? prev.income,
+        age: params.age ?? prev.age,
+        married: params.married ?? prev.married,
+        dependents: params.dependents ?? prev.dependents,
+      }));
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const handleMarriedChange = (value: boolean) => {
-    setMarried(value);
-    if (!value) {
-      setAgeSpouse(null);
-    } else {
-      setAgeSpouse(35);
-      setAgeSpouseRaw('35');
-    }
-  };
-
-  const handleDependentCountChange = (count: number) => {
-    const ages = [...dependentAges];
-    while (ages.length < count) ages.push(5);
-    ages.splice(count);
-    setDependentAges(ages);
-  };
-
-  const formatNumber = (num: number) => num.toLocaleString('en-US');
-  const parseNumber = (str: string) => {
-    const num = Number(str.replace(/,/g, ''));
-    return isNaN(num) ? 0 : num;
-  };
-
-  const buildBaseRequest = (): Omit<HouseholdRequest, 'year'> => ({
-    age_head: ageHead,
-    age_spouse: married ? ageSpouse : null,
-    dependent_ages: dependentAges,
-    income,
+  const buildBaseRequest = (h: HouseholdProfile): Omit<HouseholdRequest, 'year'> => ({
+    age_head: h.age,
+    age_spouse: h.married ? 35 : null,
+    dependent_ages: h.dependents,
+    income: h.income,
     max_earnings: maxEarnings,
     state_code: 'MO',
   });
 
-  const handleCalculate = () => {
-    const baseRequest = buildBaseRequest();
+  const handleDone = () => {
+    const customRates = configToCustomRates(path, config);
+    const baseRequest = buildBaseRequest(household);
     const reform = buildReform('custom', {}, 2027, customRates);
     setSubmittedBaseRequest(baseRequest);
     setSubmittedReform(reform);
     setTriggered(true);
-    // Kick off the 9-year household impact run (2027-2035) unless skipped.
     resetHouseholdImpact();
     if (!skipHousehold) {
       runHouseholdImpact(baseRequest, reform);
     }
-    // Kick off the 10-year state impact run.
     resetStateImpact();
     runStateImpact(reform);
   };
 
+  // Live "preview" reform derived from current wizard config — updates the
+  // sidebar number summary and the rate matrix preview without actually
+  // firing a multi-year run on every step.
+  const livePreviewRates = useMemo(
+    () => configToCustomRates(path, config),
+    [path, config],
+  );
+
   return (
-    <div className="space-y-6">
-      {/* Reform builder on top */}
-      <RateMatrixBuilder customRates={customRates} onChange={setCustomRates} />
+    <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+      {/* Left column: wizard */}
+      <div className="min-w-0">
+        <Wizard
+          path={path}
+          onPathChange={setPath}
+          config={config}
+          onConfigChange={setConfig}
+          household={household}
+          onHouseholdChange={setHousehold}
+          onShowResults={() => setShowResults(true)}
+          onDone={handleDone}
+        />
 
-      {/* Household form below */}
-      <div className="grid grid-cols-1 gap-6">
-        <section className="bg-gray-50 rounded-xl p-6 md:p-8 border border-gray-200 shadow-sm">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Your household</h2>
+        {/* Custom matrix only surfaces when the user picks the custom
+            path — kept full-width below the wizard so users can see the
+            entire 9 × 7 grid. */}
+        {path === 'custom' && (
+          <div className="mt-6">
+            <RateMatrixBuilder
+              customRates={config.customRates}
+              onChange={(cr) => setConfig({ ...config, customRates: cr })}
+            />
+          </div>
+        )}
+      </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-            {/* Employment income */}
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-600 mb-1.5">
-                Employment income
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">
-                  $
-                </span>
-                <input
-                  type="text"
-                  value={formatNumber(income)}
-                  onChange={(e) => setIncome(parseNumber(e.target.value))}
-                  className="w-full pl-6 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
-                />
-              </div>
-            </div>
+      {/* Right column: live results sidebar */}
+      <aside className="min-w-0 space-y-6">
+        {!showResults ? (
+          <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+            <p className="font-medium text-gray-700">
+              Pick a starting point on the left
+            </p>
+            <p className="mt-2">
+              Once you choose a reform path, this panel will preview the
+              year-by-year tax matrix. Click Done at the end of the wizard to
+              run the full statewide and household impact calculations.
+            </p>
+          </div>
+        ) : (
+          <>
+            <RateMatrixPreview rates={livePreviewRates} />
 
-            {/* Age */}
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1.5">
-                Your age
-              </label>
-              <input
-                type="number"
-                value={ageHeadRaw}
-                onChange={(e) => setAgeHeadRaw(e.target.value)}
-                onBlur={() => {
-                  const clamped = Math.max(
-                    18,
-                    Math.min(100, parseInt(ageHeadRaw) || 18),
-                  );
-                  setAgeHead(clamped);
-                  setAgeHeadRaw(String(clamped));
-                }}
-                min={18}
-                max={100}
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
-              />
-            </div>
-
-            {/* Filing status + spouse age */}
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1.5">
-                Filing status
-              </label>
-              <label
-                htmlFor="married"
-                className="flex items-center gap-3 w-full px-3 py-2 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
-              >
-                <input
-                  type="checkbox"
-                  id="married"
-                  checked={married}
-                  onChange={(e) => handleMarriedChange(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
-                />
-                <span className="text-sm text-gray-700">
-                  Married filing jointly
-                </span>
-              </label>
-              {married && (
-                <input
-                  type="number"
-                  value={ageSpouseRaw}
-                  onChange={(e) => setAgeSpouseRaw(e.target.value)}
-                  onBlur={() => {
-                    const clamped = Math.max(
-                      18,
-                      Math.min(100, parseInt(ageSpouseRaw) || 18),
-                    );
-                    setAgeSpouse(clamped);
-                    setAgeSpouseRaw(String(clamped));
-                  }}
-                  min={18}
-                  max={100}
-                  placeholder="Spouse age"
-                  aria-label="Spouse age"
-                  className="w-full mt-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
-                />
-              )}
-            </div>
-
-            {/* Dependents */}
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-600 mb-1.5">
-                Dependents
-              </label>
-              <input
-                type="number"
-                value={dependentAges.length}
-                onChange={(e) =>
-                  handleDependentCountChange(
-                    Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
-                  )
-                }
-                min={0}
-                max={10}
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
-              />
-              {dependentAges.length > 0 && (
-                <div className="mt-2">
-                  <span className="block text-xs font-medium text-gray-500 mb-1">
-                    Age(s) &mdash; children under 6 qualify for the federal CTC
-                  </span>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {dependentAges.map((age, i) => (
-                      <input
-                        key={i}
-                        type="number"
-                        value={age}
-                        onChange={(e) => {
-                          const newAges = [...dependentAges];
-                          newAges[i] = Math.max(
-                            0,
-                            Math.min(26, parseInt(e.target.value) || 0),
-                          );
-                          setDependentAges(newAges);
+            {/* Skip-household toggle and chart-axis options visible after a
+                run kicks off. */}
+            {triggered && (
+              <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={skipHousehold}
+                    onChange={(e) => setSkipHousehold(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
+                  />
+                  Skip household impact (state revenue only)
+                </label>
+                {!skipHousehold && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                    <span>Chart x-axis max:</span>
+                    {[200000, 500000, 1000000].map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => {
+                          setMaxEarnings(v);
+                          const next = submittedBaseRequest
+                            ? { ...submittedBaseRequest, max_earnings: v }
+                            : null;
+                          setSubmittedBaseRequest(next);
+                          if (next) {
+                            runYearHousehold(
+                              selectedYear,
+                              next,
+                              submittedReform ?? {},
+                            );
+                          }
                         }}
-                        min={0}
-                        max={26}
-                        className="px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
-                        placeholder={`Age ${i + 1}`}
-                        aria-label={`Dependent ${i + 1} age`}
-                      />
+                        className={`px-3 py-1 rounded-full font-medium transition-colors ${
+                          maxEarnings === v
+                            ? 'bg-primary-500 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        ${v >= 1000000 ? `${v / 1000000}M` : `${v / 1000}k`}
+                      </button>
                     ))}
                   </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-      </div>
+                )}
+              </div>
+            )}
 
-      {/* Calculate button + skip-household toggle */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <button
-          onClick={handleCalculate}
-          disabled={stateRunning}
-          className="py-3 px-10 rounded-lg font-semibold text-white bg-primary-500 hover:bg-primary-600 active:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md sm:w-auto w-full"
-        >
-          {stateRunning ? 'Calculating…' : 'Calculate impact'}
-        </button>
-        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={skipHousehold}
-            onChange={(e) => setSkipHousehold(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
-          />
-          Skip household impact (state revenue only)
-        </label>
-      </div>
+            {/* Household impact (fast) */}
+            {triggered && !skipHousehold && submittedBaseRequest && (
+              <ImpactAnalysis
+                years={householdYears}
+                baseRequest={submittedBaseRequest}
+                maxEarnings={maxEarnings}
+                selectedYear={selectedYear}
+                onYearChange={setSelectedYear}
+              />
+            )}
 
-      {/* Chart x-axis options */}
-      {triggered && !skipHousehold && (
-        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
-          <span>Chart x-axis max:</span>
-          {[200000, 500000, 1000000].map((v) => (
-            <button
-              key={v}
-              onClick={() => {
-                setMaxEarnings(v);
-                const next = submittedBaseRequest
-                  ? { ...submittedBaseRequest, max_earnings: v }
-                  : null;
-                setSubmittedBaseRequest(next);
-                // Kick off a rerun for the currently-selected year only.
-                if (next) {
-                  runYearHousehold(selectedYear, next, submittedReform ?? {});
-                }
-              }}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                maxEarnings === v
-                  ? 'bg-primary-500 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              ${v >= 1000000 ? `${v / 1000000}M` : `${v / 1000}k`}
-            </button>
+            {/* State 10-year impact (slow) */}
+            {triggered && (
+              <StateImpact years={stateYears} running={stateRunning} />
+            )}
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+/** Compact rate-matrix preview shown in the results sidebar. Highlights
+ * cells that differ from MO's 2025 baseline so the user can sanity-check
+ * the wizard's interpretation of the chosen path before committing. */
+function RateMatrixPreview({ rates }: { rates: Record<number, number[]> }) {
+  const years = Object.keys(rates)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const editableBrackets = [1, 2, 3, 4, 5, 6, 7];
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 overflow-x-auto">
+      <div className="flex items-baseline justify-between gap-2 mb-3">
+        <h3 className="text-sm font-semibold text-gray-800">Reform preview</h3>
+        <span className="text-xs text-gray-500">2025 → reformed marginal rate</span>
+      </div>
+      <table className="w-full text-[11px] border-collapse">
+        <thead>
+          <tr className="bg-gray-50">
+            <th className="px-1.5 py-1.5 text-left font-medium text-gray-500 sticky left-0 bg-gray-50">
+              Bracket
+            </th>
+            {years.map((y) => (
+              <th
+                key={y}
+                className="px-1.5 py-1.5 text-center font-medium text-gray-500"
+              >
+                {y}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {editableBrackets.map((i) => (
+            <tr key={i} className="border-t border-gray-100">
+              <td className="px-1.5 py-1 text-gray-600 sticky left-0 bg-white whitespace-nowrap">
+                {i}
+              </td>
+              {years.map((y) => {
+                const r = rates[y]?.[i] ?? 0;
+                const baseline = [
+                  0, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.047,
+                ][i];
+                const diff = Math.abs(r - baseline) > 1e-6;
+                return (
+                  <td
+                    key={y}
+                    className={`px-1.5 py-1 text-center tabular-nums ${
+                      diff ? 'text-primary-700 font-medium' : 'text-gray-500'
+                    }`}
+                  >
+                    {(r * 100).toFixed(2)}%
+                  </td>
+                );
+              })}
+            </tr>
           ))}
-        </div>
-      )}
-
-      {/* Household impact (fast) — runs for 2027-2035 with year navigation */}
-      {triggered && !skipHousehold && submittedBaseRequest && (
-        <ImpactAnalysis
-          years={householdYears}
-          baseRequest={submittedBaseRequest}
-          maxEarnings={maxEarnings}
-          selectedYear={selectedYear}
-          onYearChange={setSelectedYear}
-        />
-      )}
-
-      {/* State 10-year impact (slow) */}
-      {triggered && (
-        <StateImpact years={stateYears} running={stateRunning} />
-      )}
+        </tbody>
+      </table>
     </div>
   );
 }
