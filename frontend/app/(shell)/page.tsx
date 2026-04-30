@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ImpactAnalysis from '@/components/ImpactAnalysis';
 import PolicyOverview from '@/components/PolicyOverview';
+import RateLineChart from '@/components/RateLineChart';
 import RateMatrixBuilder from '@/components/RateMatrixBuilder';
 import StateImpact from '@/components/StateImpact';
 import Wizard, {
@@ -18,6 +19,7 @@ import { parseHashParams } from '@/lib/embedding';
 import {
   buildCapRates,
   buildEliminateRates,
+  buildPctRates,
   buildPpRates,
   buildReform,
   defaultCustomRates,
@@ -99,21 +101,57 @@ function configToCustomRates(
       config.cap.endPct,
     );
   }
-  if (path === 'pp') {
-    return buildPpRates(
-      config.pp.startYear,
-      config.pp.endYear,
-      config.pp.startPp,
-      config.pp.endPp,
-    );
+  if (path === 'cut') {
+    return config.cut.unit === 'pp'
+      ? buildPpRates(
+          config.cut.startYear,
+          config.cut.endYear,
+          config.cut.startMag,
+          config.cut.endMag,
+        )
+      : buildPctRates(
+          config.cut.startYear,
+          config.cut.endYear,
+          config.cut.startMag,
+          config.cut.endMag,
+        );
   }
   if (path === 'eliminate') {
-    return buildEliminateRates(config.eliminateStartYear);
+    return buildEliminateRates(
+      config.eliminate.startYear,
+      config.eliminate.endYear,
+    );
   }
   if (path === 'custom') {
     return config.customRates;
   }
   return defaultCustomRates();
+}
+
+/** One-line summary of the current scenario for the chip row above the
+ * wizard. Returns null when no path is chosen yet. */
+function summarizeScenario(
+  path: ReformPath | null,
+  config: ReformConfig,
+): string | null {
+  if (path === null) return null;
+  if (path === 'cap') {
+    const { startYear, endYear, startPct, endPct } = config.cap;
+    if (startYear === endYear) return `Cap • ${startYear} • ${startPct}%`;
+    return `Cap • ${startYear}→${endYear} • ${startPct}%→${endPct}%`;
+  }
+  if (path === 'cut') {
+    const { unit, startYear, endYear, startMag, endMag } = config.cut;
+    if (unit === 'pp') {
+      return `Cut • ${startYear}→${endYear} • ${startMag}pp→${endMag}pp`;
+    }
+    return `Cut • ${startYear}→${endYear} • ${(startMag * 100).toFixed(0)}%→${(endMag * 100).toFixed(0)}%`;
+  }
+  if (path === 'eliminate') {
+    const { startYear, endYear } = config.eliminate;
+    return `Phase out • ${startYear}→${endYear}`;
+  }
+  return 'Custom matrix';
 }
 
 /** Two-column wizard + results layout. */
@@ -214,54 +252,75 @@ function ReformImpactTab() {
     [path, config],
   );
 
+  const summary = summarizeScenario(path, config);
+
   return (
-    <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-      {/* Left column: wizard */}
-      <div className="min-w-0">
-        <Wizard
-          path={path}
-          onPathChange={setPath}
-          config={config}
-          onConfigChange={setConfig}
-          household={household}
-          onHouseholdChange={setHousehold}
-          onShowResults={() => setShowResults(true)}
-          onDone={handleDone}
-        />
+    <div className="space-y-6">
+      {/* G1 — sticky scenario summary chip row above both columns. */}
+      {summary && (
+        <div className="sticky top-0 z-10 -mx-6 px-6 py-3 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
+            Scenario
+          </span>
+          <span className="rounded-full bg-primary-50 border border-primary-200 px-3 py-1 text-xs font-medium text-primary-700">
+            {summary}
+          </span>
+          {triggered && (
+            <span className="text-xs text-gray-500">
+              Household: ${household.income.toLocaleString('en-US')}, age{' '}
+              {household.age}, {household.married ? 'married' : 'single'},{' '}
+              {household.dependents.length}{' '}
+              {household.dependents.length === 1 ? 'dependent' : 'dependents'}
+            </span>
+          )}
+        </div>
+      )}
 
-        {/* Custom matrix only surfaces when the user picks the custom
-            path — kept full-width below the wizard so users can see the
-            entire 9 × 7 grid. */}
-        {path === 'custom' && (
-          <div className="mt-6">
-            <RateMatrixBuilder
-              customRates={config.customRates}
-              onChange={(cr) => setConfig({ ...config, customRates: cr })}
-            />
-          </div>
-        )}
-      </div>
+      <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        {/* Left column: wizard */}
+        <div className="min-w-0">
+          <Wizard
+            path={path}
+            onPathChange={setPath}
+            config={config}
+            onConfigChange={setConfig}
+            household={household}
+            onHouseholdChange={setHousehold}
+            onShowResults={() => setShowResults(true)}
+            onDone={handleDone}
+          />
 
-      {/* Right column: live results sidebar */}
-      <aside className="min-w-0 space-y-6">
-        {!showResults ? (
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
-            <p className="font-medium text-gray-700">
-              Pick a starting point on the left
-            </p>
-            <p className="mt-2">
-              Once you choose a reform path, this panel will preview the
-              year-by-year tax matrix. Click Done at the end of the wizard to
-              run the full statewide and household impact calculations.
-            </p>
-          </div>
-        ) : (
-          <>
-            <RateMatrixPreview rates={livePreviewRates} />
+          {/* Custom matrix only surfaces when the user picks the custom
+              path — kept full-width below the wizard so users can see the
+              entire 9 × 7 grid. */}
+          {path === 'custom' && (
+            <div className="mt-6">
+              <RateMatrixBuilder
+                customRates={config.customRates}
+                onChange={(cr) => setConfig({ ...config, customRates: cr })}
+              />
+            </div>
+          )}
+        </div>
 
-            {/* Skip-household toggle and chart-axis options visible after a
-                run kicks off. */}
-            {triggered && (
+        {/* Right column: live results sidebar */}
+        <aside className="min-w-0 space-y-6">
+          {!showResults ? (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+              <p className="font-medium text-gray-700">
+                Pick a starting point on the left
+              </p>
+              <p className="mt-2">
+                Once you choose a reform path, this panel will preview the
+                year-by-year rates and impacts. Click Done at the end of the
+                wizard to run the full statewide and household calculations.
+              </p>
+            </div>
+          ) : (
+            <>
+              <RateLineChart rates={livePreviewRates} />
+
+              {triggered && (
               <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
                 <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
                   <input
@@ -317,74 +376,15 @@ function ReformImpactTab() {
               />
             )}
 
-            {/* State 10-year impact (slow) */}
-            {triggered && (
-              <StateImpact years={stateYears} running={stateRunning} />
-            )}
-          </>
-        )}
-      </aside>
+              {/* State 10-year impact (slow) */}
+              {triggered && (
+                <StateImpact years={stateYears} running={stateRunning} />
+              )}
+            </>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
 
-/** Compact rate-matrix preview shown in the results sidebar. Highlights
- * cells that differ from MO's 2025 baseline so the user can sanity-check
- * the wizard's interpretation of the chosen path before committing. */
-function RateMatrixPreview({ rates }: { rates: Record<number, number[]> }) {
-  const years = Object.keys(rates)
-    .map(Number)
-    .sort((a, b) => a - b);
-  const editableBrackets = [1, 2, 3, 4, 5, 6, 7];
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 overflow-x-auto">
-      <div className="flex items-baseline justify-between gap-2 mb-3">
-        <h3 className="text-sm font-semibold text-gray-800">Reform preview</h3>
-        <span className="text-xs text-gray-500">2025 → reformed marginal rate</span>
-      </div>
-      <table className="w-full text-[11px] border-collapse">
-        <thead>
-          <tr className="bg-gray-50">
-            <th className="px-1.5 py-1.5 text-left font-medium text-gray-500 sticky left-0 bg-gray-50">
-              Bracket
-            </th>
-            {years.map((y) => (
-              <th
-                key={y}
-                className="px-1.5 py-1.5 text-center font-medium text-gray-500"
-              >
-                {y}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {editableBrackets.map((i) => (
-            <tr key={i} className="border-t border-gray-100">
-              <td className="px-1.5 py-1 text-gray-600 sticky left-0 bg-white whitespace-nowrap">
-                {i}
-              </td>
-              {years.map((y) => {
-                const r = rates[y]?.[i] ?? 0;
-                const baseline = [
-                  0, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.047,
-                ][i];
-                const diff = Math.abs(r - baseline) > 1e-6;
-                return (
-                  <td
-                    key={y}
-                    className={`px-1.5 py-1 text-center tabular-nums ${
-                      diff ? 'text-primary-700 font-medium' : 'text-gray-500'
-                    }`}
-                  >
-                    {(r * 100).toFixed(2)}%
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}

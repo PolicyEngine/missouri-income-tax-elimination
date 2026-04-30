@@ -250,15 +250,47 @@ export function buildPpRates(
   return out;
 }
 
-/** Build a year × bracket rates matrix that zeroes every editable bracket
- * from `startYear` onward. */
-export function buildEliminateRates(
+/** Build a year × bracket rates matrix for a proportional (percentage)
+ * cut of each bracket's 2025 baseline rate. `startPct` and `endPct` are
+ * the share *removed* (e.g. 0.20 = drop every rate by 20%); the cut is
+ * interpolated linearly between the start and end years. */
+export function buildPctRates(
   startYear: number,
+  endYear: number,
+  startPct: number,
+  endPct: number,
 ): Record<number, number[]> {
   const out = defaultCustomRates();
   for (const y of REFORM_YEARS) {
     if (y < startYear) continue;
-    for (let i = 1; i < out[y].length; i++) out[y][i] = 0;
+    const cutY = interpolateRamp(y, startYear, endYear, startPct, endPct);
+    const cut = Math.max(0, Math.min(1, cutY));
+    for (let i = 1; i < out[y].length; i++) {
+      out[y][i] = MO_2025_RATES[i] * (1 - cut);
+    }
+  }
+  return out;
+}
+
+/** Build a year × bracket rates matrix that *phases* every editable
+ * bracket from its 2025 baseline rate down to zero between `startYear`
+ * and `endYear`. Years on or after `endYear` are zeroed; years strictly
+ * before `startYear` are unchanged. */
+export function buildEliminateRates(
+  startYear: number,
+  endYear: number,
+): Record<number, number[]> {
+  const out = defaultCustomRates();
+  for (const y of REFORM_YEARS) {
+    if (y < startYear) continue;
+    if (y >= endYear) {
+      for (let i = 1; i < out[y].length; i++) out[y][i] = 0;
+      continue;
+    }
+    const t = endYear === startYear ? 1 : (y - startYear) / (endYear - startYear);
+    for (let i = 1; i < out[y].length; i++) {
+      out[y][i] = MO_2025_RATES[i] * (1 - t);
+    }
   }
   return out;
 }
