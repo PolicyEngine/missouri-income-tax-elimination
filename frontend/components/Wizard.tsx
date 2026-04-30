@@ -73,6 +73,9 @@ interface Props {
   /** Fires on the Done step — the parent kicks the calc and may collapse
    * the wizard into a summary card. */
   onDone: () => void;
+  /** Fires from the household step's Skip button — parent sets
+   * skipHousehold and the wizard advances to review. */
+  onSkipHousehold: () => void;
 }
 
 const STEP_IDS = [
@@ -252,6 +255,7 @@ export default function Wizard({
   onHouseholdChange,
   onShowResults,
   onDone,
+  onSkipHousehold,
 }: Props) {
   const [step, setStep] = useState(0);
   const steps = useMemo(() => visibleSteps(path), [path]);
@@ -673,18 +677,33 @@ export default function Wizard({
               </button>
             )}
           </div>
-          <button
-            type="button"
-            onClick={next}
-            disabled={!canAdvance}
-            className={`rounded-full px-6 py-2.5 text-sm font-semibold transition-colors ${
+          <div className="flex items-center gap-2">
+            {currentStep?.id === 'household' && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSkipHousehold();
+                  next();
+                }}
+                className="rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:border-primary-200 hover:bg-primary-50/40 hover:text-primary-700"
+                title="Skip household impact and only compute the statewide revenue change"
+              >
+                Skip
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={next}
+              disabled={!canAdvance}
+              className={`rounded-full px-6 py-2.5 text-sm font-semibold transition-colors ${
               canAdvance
                 ? 'bg-primary-500 text-white hover:bg-primary-600'
                 : 'cursor-not-allowed bg-gray-200 text-gray-400'
             }`}
-          >
-            {isLastStep ? 'Done' : 'Next'}
-          </button>
+            >
+              {isLastStep ? 'Done' : 'Next'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

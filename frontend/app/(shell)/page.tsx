@@ -288,6 +288,7 @@ function ReformImpactTab() {
             onHouseholdChange={setHousehold}
             onShowResults={() => setShowResults(true)}
             onDone={handleDone}
+            onSkipHousehold={() => setSkipHousehold(true)}
           />
 
           {/* Custom matrix only surfaces when the user picks the custom
@@ -325,48 +326,37 @@ function ReformImpactTab() {
       {/* Full-width impacts section, only after the user clicks Done. */}
       {triggered && (
         <div className="space-y-6 pt-4">
-          <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={skipHousehold}
-                onChange={(e) => setSkipHousehold(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
-              />
-              Skip household impact (state revenue only)
-            </label>
-            {!skipHousehold && (
-              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                <span>Chart x-axis max:</span>
-                {[200000, 500000, 1000000].map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => {
-                      setMaxEarnings(v);
-                      const next = submittedBaseRequest
-                        ? { ...submittedBaseRequest, max_earnings: v }
-                        : null;
-                      setSubmittedBaseRequest(next);
-                      if (next) {
-                        runYearHousehold(
-                          selectedYear,
-                          next,
-                          submittedReform ?? {},
-                        );
-                      }
-                    }}
-                    className={`px-3 py-1 rounded-full font-medium transition-colors ${
-                      maxEarnings === v
-                        ? 'bg-primary-500 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    ${v >= 1000000 ? `${v / 1000000}M` : `${v / 1000}k`}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {!skipHousehold && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white px-5 py-3 text-xs text-gray-600">
+              <span>Chart x-axis max:</span>
+              {[200000, 500000, 1000000].map((v) => (
+                <button
+                  key={v}
+                  onClick={() => {
+                    setMaxEarnings(v);
+                    const next = submittedBaseRequest
+                      ? { ...submittedBaseRequest, max_earnings: v }
+                      : null;
+                    setSubmittedBaseRequest(next);
+                    if (next) {
+                      runYearHousehold(
+                        selectedYear,
+                        next,
+                        submittedReform ?? {},
+                      );
+                    }
+                  }}
+                  className={`px-3 py-1 rounded-full font-medium transition-colors ${
+                    maxEarnings === v
+                      ? 'bg-primary-500 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  ${v >= 1000000 ? `${v / 1000000}M` : `${v / 1000}k`}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Household impact (fast) */}
           {!skipHousehold && submittedBaseRequest && (
