@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { MO_2025_RATES, REFORM_YEARS, defaultCustomRates } from '@/lib/reform';
+import { REFORM_YEARS } from '@/lib/reform';
 
 /**
  * Guided wizard for the Missouri income tax elimination dashboard.
@@ -12,7 +12,7 @@ import { MO_2025_RATES, REFORM_YEARS, defaultCustomRates } from '@/lib/reform';
  * sibling column update live as the user advances.
  */
 
-export type ReformPath = 'cap' | 'cut' | 'eliminate' | 'custom';
+export type ReformPath = 'cap' | 'cut' | 'eliminate';
 export type CutUnit = 'pp' | 'pct';
 
 export interface HouseholdProfile {
@@ -49,15 +49,12 @@ export interface ReformConfig {
     startYear: number;
     endYear: number;
   };
-  /** Custom matrix override (only used when path === 'custom'). */
-  customRates: Record<number, number[]>;
 }
 
 export const DEFAULT_REFORM_CONFIG: ReformConfig = {
   cap: { startYear: 2027, endYear: 2035, startPct: 4.7, endPct: 3.0 },
   cut: { unit: 'pp', startYear: 2027, endYear: 2035, startMag: 0, endMag: 1.5 },
   eliminate: { startYear: 2027, endYear: 2035 },
-  customRates: defaultCustomRates(),
 };
 
 interface Props {
@@ -240,14 +237,12 @@ const PATH_LABELS: Record<ReformPath, string> = {
   cap: 'Top-rate cap',
   cut: 'Across-the-board cut',
   eliminate: 'Phase out',
-  custom: 'Custom rate matrix',
 };
 
 const PATH_DESCRIPTIONS: Record<ReformPath, string> = {
   cap: 'Cap the top marginal rate at a chosen value, optionally ramping over multiple years.',
   cut: 'Lower every bracket each year, either by a fixed number of percentage points or by a share of its baseline rate. Ramps linearly between the start and end years.',
   eliminate: 'Phase every bracket from its 2025 baseline down to zero between two chosen years.',
-  custom: 'Edit the year × bracket rate matrix directly.',
 };
 
 export default function Wizard({
@@ -631,13 +626,6 @@ export default function Wizard({
                 <p className="text-xs text-gray-500">
                   Income tax phased to zero between {config.eliminate.startYear}
                   {' '}and {config.eliminate.endYear}.
-                </p>
-              )}
-              {path === 'custom' && (
-                <p className="text-xs text-gray-500">
-                  Edit the year × bracket matrix below. The 2025 baseline
-                  rates ({MO_2025_RATES.slice(1).map((r) => `${(r * 100).toFixed(1)}%`).join(' / ')})
-                  are pre-filled.
                 </p>
               )}
               <p className="pt-2 text-xs text-gray-500">

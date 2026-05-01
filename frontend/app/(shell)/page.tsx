@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ImpactAnalysis from '@/components/ImpactAnalysis';
 import PolicyOverview from '@/components/PolicyOverview';
 import RateLineChart from '@/components/RateLineChart';
-import RateMatrixBuilder from '@/components/RateMatrixBuilder';
 import StateImpact from '@/components/StateImpact';
 import Wizard, {
   DEFAULT_REFORM_CONFIG,
@@ -122,9 +121,6 @@ function configToCustomRates(
       config.eliminate.endYear,
     );
   }
-  if (path === 'custom') {
-    return config.customRates;
-  }
   return defaultCustomRates();
 }
 
@@ -151,7 +147,7 @@ function summarizeScenario(
     const { startYear, endYear } = config.eliminate;
     return `Phase out • ${startYear}→${endYear}`;
   }
-  return 'Custom matrix';
+  return null;
 }
 
 /** Two-column wizard + results layout. */
@@ -291,18 +287,6 @@ function ReformImpactTab() {
             onSkipHousehold={() => setSkipHousehold(true)}
             householdSkipped={skipHousehold}
           />
-
-          {/* Custom matrix only surfaces when the user picks the custom
-              path — kept full-width below the wizard so users can see the
-              entire 9 × 7 grid. */}
-          {path === 'custom' && (
-            <div className="mt-6">
-              <RateMatrixBuilder
-                customRates={config.customRates}
-                onChange={(cr) => setConfig({ ...config, customRates: cr })}
-              />
-            </div>
-          )}
         </div>
 
         {/* Right column: live rate-line preview */}
