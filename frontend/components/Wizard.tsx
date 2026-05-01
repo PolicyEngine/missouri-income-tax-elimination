@@ -99,9 +99,10 @@ interface StepDef {
 const STEPS: StepDef[] = [
   { id: 'intro', showFor: () => true },
   { id: 'path', showFor: () => true },
-  // Cap folds years + rates onto the magnitude step. Cut and eliminate
-  // keep ramp (years) separate from magnitude.
-  { id: 'ramp', showFor: (p) => p === 'cut' || p === 'eliminate' },
+  // Cap and cut fold years + magnitude onto a single step. Eliminate
+  // only takes years (start year + end year), so it uses the ramp step
+  // and skips magnitude.
+  { id: 'ramp', showFor: (p) => p === 'eliminate' },
   { id: 'magnitude', showFor: (p) => p === 'cap' || p === 'cut' },
   { id: 'household', showFor: () => true },
   { id: 'review', showFor: () => true },
@@ -341,52 +342,34 @@ export default function Wizard({
           </StepShell>
         );
 
-      case 'ramp': {
-        const rampConfig =
-          path === 'cap'
-            ? config.cap
-            : path === 'cut'
-              ? config.cut
-              : config.eliminate;
-        const setRamp = (patch: { startYear?: number; endYear?: number }) => {
-          if (path === 'cap') updateCap(patch);
-          else if (path === 'cut') updateCut(patch);
-          else updateEliminate(patch);
-        };
+      case 'ramp':
+        // Only the eliminate path uses this step; cap and cut fold years
+        // into their magnitude step.
         return (
           <StepShell
             stepIndex={clampedStep}
             totalSteps={steps.length}
-            title={
-              path === 'eliminate'
-                ? 'How fast does the phase-out happen?'
-                : 'When does it phase in?'
-            }
-            subtitle={
-              path === 'eliminate'
-                ? 'Rates ramp linearly from the 2025 baseline at the start year down to zero at the end year.'
-                : 'Pick the start and end year. The change ramps linearly between them; years before the start year are left untouched.'
-            }
+            title="How fast does the phase-out happen?"
+            subtitle="Rates ramp linearly from the 2025 baseline at the start year down to zero at the end year."
           >
             <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
               <div className="flex items-center gap-2 text-sm text-gray-700">
                 <span className="font-medium">Start year</span>
                 <YearSelect
-                  value={rampConfig.startYear}
-                  onChange={(v) => setRamp({ startYear: v })}
+                  value={config.eliminate.startYear}
+                  onChange={(v) => updateEliminate({ startYear: v })}
                 />
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-700">
                 <span className="font-medium">End year</span>
                 <YearSelect
-                  value={rampConfig.endYear}
-                  onChange={(v) => setRamp({ endYear: v })}
+                  value={config.eliminate.endYear}
+                  onChange={(v) => updateEliminate({ endYear: v })}
                 />
               </div>
             </div>
           </StepShell>
         );
-      }
 
       case 'magnitude':
         if (path === 'cap') {
@@ -436,13 +419,13 @@ export default function Wizard({
             </StepShell>
           );
         }
-        // cut path: pp ↔ pct toggle + magnitude inputs
+        // cut path: pp ↔ pct toggle + years + magnitude on one step
         return (
           <StepShell
             stepIndex={clampedStep}
             totalSteps={steps.length}
-            title="How big is the cut?"
-            subtitle="Choose the unit and set the magnitude at the start and end years."
+            title="Set the cut"
+            subtitle="Choose the unit, then pick the start and end year and the cut size at each."
           >
             <div className="space-y-4 rounded-2xl border border-gray-200 bg-white px-5 py-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -473,10 +456,17 @@ export default function Wizard({
                 </button>
               </div>
 
-              <div className="flex items-center gap-3 text-sm text-gray-700">
-                <span className="w-28 font-medium">
-                  {config.cut.startYear} cut
-                </span>
+              <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
+                <span></span>
+                <span>Year</span>
+                <span>Cut</span>
+              </div>
+              <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
+                <span className="font-medium">Start</span>
+                <YearSelect
+                  value={config.cut.startYear}
+                  onChange={(v) => updateCut({ startYear: v })}
+                />
                 {config.cut.unit === 'pp' ? (
                   <PctInput
                     value={config.cut.startMag}
@@ -493,10 +483,12 @@ export default function Wizard({
                   />
                 )}
               </div>
-              <div className="flex items-center gap-3 text-sm text-gray-700">
-                <span className="w-28 font-medium">
-                  {config.cut.endYear} cut
-                </span>
+              <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
+                <span className="font-medium">End</span>
+                <YearSelect
+                  value={config.cut.endYear}
+                  onChange={(v) => updateCut({ endYear: v })}
+                />
                 {config.cut.unit === 'pp' ? (
                   <PctInput
                     value={config.cut.endMag}
@@ -515,7 +507,7 @@ export default function Wizard({
               </div>
               <p className="text-xs leading-5 text-gray-500">
                 {config.cut.unit === 'pp'
-                  ? 'Each bracket falls by the interpolated pp amount that year, floored at 0. Years strictly before the start year are unchanged.'
+                  ? 'Each bracket falls by the interpolated pp amount that year, floored at 0. Years before the start year are unchanged.'
                   : 'Each bracket equals its 2025 baseline times (1 − share). 100% means a full elimination at that year.'}
               </p>
             </div>
