@@ -11,6 +11,18 @@ export interface YearImpact {
   error?: string;
 }
 
+/** Synthesised zero-impact budget for years where the reform leaves every
+ * bracket at its 2025 baseline. Saves a /us/economy round trip per year. */
+const ZERO_BUDGET: BudgetImpact = {
+  baseline_net_income: 0,
+  budgetary_impact: 0,
+  federal_tax_revenue_impact: 0,
+  state_tax_revenue_impact: 0,
+  tax_revenue_impact: 0,
+  benefit_spending_impact: 0,
+  households: 0,
+};
+
 const YEARS = [
   2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035,
 ] as const;
@@ -40,7 +52,10 @@ export function useStateImpact() {
   const abortRef = useRef<AbortController | null>(null);
 
   const run = useCallback(
-    async (reform: Record<string, Record<string, number | boolean>>) => {
+    async (
+      reform: Record<string, Record<string, number | boolean>>,
+      unchangedYears?: Set<number>,
+    ) => {
       // Cancel any in-flight run first.
       if (abortRef.current) {
         abortRef.current.abort();
@@ -51,15 +66,39 @@ export function useStateImpact() {
       setRunning(true);
       setYears(YEARS.map((y) => ({ year: y, status: 'pending' })));
 
+      // Years that match the 2025 baseline across every bracket short-circuit
+      // to a zero-impact budget — no sim fires.
+      const yearsToFire = YEARS.filter((y) => !unchangedYears?.has(y));
+      if (unchangedYears) {
+        setYears((prev) =>
+          prev.map((p) =>
+            unchangedYears.has(p.year)
+              ? { year: p.year, status: 'ok', budget: ZERO_BUDGET }
+              : p,
+          ),
+        );
+      }
+
+      // Empty reform after stripping baseline-equal cells: every year is a
+      // no-op, skip the network entirely.
+      if (yearsToFire.length === 0) {
+        setRunning(false);
+        return;
+      }
+
       try {
         const policyId = await createPolicy(reform);
-        // Mark all as computing up front, then poll years with bounded
+        // Mark remaining years as computing, then poll with bounded
         // concurrency. Each year's setState fires independently as its
         // simulation finishes, so results stream in progressively.
         setYears((prev) =>
-          prev.map((p) => ({ ...p, status: 'computing' as const })),
+          prev.map((p) =>
+            unchangedYears?.has(p.year)
+              ? p
+              : { ...p, status: 'computing' as const },
+          ),
         );
-        await runWithConcurrency(YEARS, STATE_CONCURRENCY, async (y) => {
+        await runWithConcurrency(yearsToFire, STATE_CONCURRENCY, async (y) => {
           if (controller.signal.aborted) return;
           try {
             const result = await pollEconomicImpact(

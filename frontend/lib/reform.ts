@@ -194,6 +194,36 @@ export function defaultCustomRates(): Record<number, number[]> {
   return out;
 }
 
+/**
+ * Years in the rates matrix where every bracket equals MO_2025_RATES.
+ * The multi-year hooks short-circuit these to a synthesized zero-impact
+ * result instead of firing a sim that would inevitably return zero.
+ *
+ * Uses a small tolerance (1e-9) so floating-point noise from interpolation
+ * doesn't accidentally classify a baseline year as "changed".
+ */
+export function unchangedYears(
+  rates: Record<number, number[]>,
+): Set<number> {
+  const out = new Set<number>();
+  for (const y of REFORM_YEARS) {
+    const row = rates[y];
+    if (!row) {
+      out.add(y);
+      continue;
+    }
+    let allBaseline = true;
+    for (let i = 0; i < MO_2025_RATES.length; i++) {
+      if (Math.abs((row[i] ?? MO_2025_RATES[i]) - MO_2025_RATES[i]) > 1e-9) {
+        allBaseline = false;
+        break;
+      }
+    }
+    if (allBaseline) out.add(y);
+  }
+  return out;
+}
+
 /** Linearly interpolate between two (year, value) endpoints. Clamps to the
  * closer endpoint outside the range. */
 function interpolateRamp(
