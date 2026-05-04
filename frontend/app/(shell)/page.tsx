@@ -17,7 +17,6 @@ import type { HouseholdRequest } from '@/lib/types';
 import { parseHashParams } from '@/lib/embedding';
 import {
   buildCapRates,
-  buildEliminateRates,
   buildPctRates,
   buildPpRates,
   buildReform,
@@ -100,25 +99,20 @@ function configToCustomRates(
       config.cap.endPct,
     );
   }
-  if (path === 'cut') {
-    return config.cut.unit === 'pp'
-      ? buildPpRates(
-          config.cut.startYear,
-          config.cut.endYear,
-          config.cut.startMag,
-          config.cut.endMag,
-        )
-      : buildPctRates(
-          config.cut.startYear,
-          config.cut.endYear,
-          config.cut.startMag,
-          config.cut.endMag,
-        );
+  if (path === 'pp') {
+    return buildPpRates(
+      config.pp.startYear,
+      config.pp.endYear,
+      config.pp.startPp,
+      config.pp.endPp,
+    );
   }
-  if (path === 'eliminate') {
-    return buildEliminateRates(
-      config.eliminate.startYear,
-      config.eliminate.endYear,
+  if (path === 'pct') {
+    return buildPctRates(
+      config.pct.startYear,
+      config.pct.endYear,
+      config.pct.startShare,
+      config.pct.endShare,
     );
   }
   return defaultCustomRates();
@@ -136,16 +130,13 @@ function summarizeScenario(
     if (startYear === endYear) return `Cap • ${startYear} • ${startPct}%`;
     return `Cap • ${startYear}→${endYear} • ${startPct}%→${endPct}%`;
   }
-  if (path === 'cut') {
-    const { unit, startYear, endYear, startMag, endMag } = config.cut;
-    if (unit === 'pp') {
-      return `Cut • ${startYear}→${endYear} • ${startMag}pp→${endMag}pp`;
-    }
-    return `Cut • ${startYear}→${endYear} • ${(startMag * 100).toFixed(0)}%→${(endMag * 100).toFixed(0)}%`;
+  if (path === 'pp') {
+    const { startYear, endYear, startPp, endPp } = config.pp;
+    return `pp cut • ${startYear}→${endYear} • ${startPp}pp→${endPp}pp`;
   }
-  if (path === 'eliminate') {
-    const { startYear, endYear } = config.eliminate;
-    return `Phase out • ${startYear}→${endYear}`;
+  if (path === 'pct') {
+    const { startYear, endYear, startShare, endShare } = config.pct;
+    return `% cut • ${startYear}→${endYear} • ${(startShare * 100).toFixed(0)}%→${(endShare * 100).toFixed(0)}%`;
   }
   return null;
 }

@@ -12,8 +12,7 @@ import { REFORM_YEARS } from '@/lib/reform';
  * sibling column update live as the user advances.
  */
 
-export type ReformPath = 'cap' | 'cut' | 'eliminate';
-export type CutUnit = 'pp' | 'pct';
+export type ReformPath = 'cap' | 'pp' | 'pct';
 
 export interface HouseholdProfile {
   income: number;
@@ -30,31 +29,29 @@ export interface ReformConfig {
     startPct: number;
     endPct: number;
   };
-  /** Across-the-board cut config (used when path === 'cut'). The unit
-   *  toggles between "pp" (subtract pp from each bracket) and "pct"
-   *  (proportional cut as a share of the baseline rate). */
-  cut: {
-    unit: CutUnit;
+  /** Percentage-point cut config: subtract pp from every bracket, ramps
+   *  linearly from `startPp` at `startYear` to `endPp` at `endYear`. */
+  pp: {
     startYear: number;
     endYear: number;
-    /** Magnitude at startYear; pp is a percentage-point amount, pct is
-     *  the share removed (0–1, e.g. 0.20 = drop rates by 20%). */
-    startMag: number;
-    /** Magnitude at endYear. */
-    endMag: number;
+    startPp: number;
+    endPp: number;
   };
-  /** Phased full-elimination config: rates ramp from baseline at
-   *  `startYear` down to zero at `endYear`. */
-  eliminate: {
+  /** Percentage cut config: each bracket = baseline × (1 − share). The
+   *  share ramps from `startShare` at `startYear` to `endShare` at
+   *  `endYear`. Setting endShare = 1 (100%) phases the tax to zero. */
+  pct: {
     startYear: number;
     endYear: number;
+    startShare: number;
+    endShare: number;
   };
 }
 
 export const DEFAULT_REFORM_CONFIG: ReformConfig = {
   cap: { startYear: 2027, endYear: 2035, startPct: 4.7, endPct: 3.0 },
-  cut: { unit: 'pp', startYear: 2027, endYear: 2035, startMag: 0, endMag: 1.5 },
-  eliminate: { startYear: 2027, endYear: 2035 },
+  pp: { startYear: 2027, endYear: 2035, startPp: 0, endPp: 1.5 },
+  pct: { startYear: 2027, endYear: 2035, startShare: 0, endShare: 0.5 },
 };
 
 interface Props {
@@ -81,7 +78,6 @@ interface Props {
 const STEP_IDS = [
   'intro',
   'path',
-  'ramp',
   'magnitude',
   'household',
   'review',
@@ -93,14 +89,11 @@ interface StepDef {
   showFor: (path: ReformPath | null) => boolean;
 }
 
+// Cap, pp, and pct all fold years + magnitude into one magnitude step.
 const STEPS: StepDef[] = [
   { id: 'intro', showFor: () => true },
   { id: 'path', showFor: () => true },
-  // Cap and cut fold years + magnitude onto a single step. Eliminate
-  // only takes years (start year + end year), so it uses the ramp step
-  // and skips magnitude.
-  { id: 'ramp', showFor: (p) => p === 'eliminate' },
-  { id: 'magnitude', showFor: (p) => p === 'cap' || p === 'cut' },
+  { id: 'magnitude', showFor: (p) => p !== null },
   { id: 'household', showFor: () => true },
   { id: 'review', showFor: () => true },
 ];
@@ -235,14 +228,14 @@ function YearSelect({
 
 const PATH_LABELS: Record<ReformPath, string> = {
   cap: 'Top-rate cap',
-  cut: 'Across-the-board cut',
-  eliminate: 'Phase out',
+  pp: 'Percentage-point cut',
+  pct: 'Percentage cut',
 };
 
 const PATH_DESCRIPTIONS: Record<ReformPath, string> = {
   cap: 'Cap the top marginal rate at a chosen value, optionally ramping over multiple years.',
-  cut: 'Lower every bracket each year, either by a fixed number of percentage points or by a share of its baseline rate. Ramps linearly between the start and end years.',
-  eliminate: 'Phase every bracket from its 2025 baseline down to zero between two chosen years.',
+  pp: 'Subtract a fixed number of percentage points from every bracket each year, ramping linearly between the start and end years.',
+  pct: 'Reduce every bracket to a chosen share of its baseline rate. 100% phases the tax to zero by the end year.',
 };
 
 export default function Wizard({
@@ -268,10 +261,10 @@ export default function Wizard({
     onConfigChange({ ...config, [key]: value });
   const updateCap = (patch: Partial<ReformConfig['cap']>) =>
     update('cap', { ...config.cap, ...patch });
-  const updateCut = (patch: Partial<ReformConfig['cut']>) =>
-    update('cut', { ...config.cut, ...patch });
-  const updateEliminate = (patch: Partial<ReformConfig['eliminate']>) =>
-    update('eliminate', { ...config.eliminate, ...patch });
+  const updatePp = (patch: Partial<ReformConfig['pp']>) =>
+    update('pp', { ...config.pp, ...patch });
+  const updatePct = (patch: Partial<ReformConfig['pct']>) =>
+    update('pct', { ...config.pct, ...patch });
   const updateHousehold = (patch: Partial<HouseholdProfile>) =>
     onHouseholdChange({ ...household, ...patch });
 
@@ -337,35 +330,6 @@ export default function Wizard({
           </StepShell>
         );
 
-      case 'ramp':
-        // Only the eliminate path uses this step; cap and cut fold years
-        // into their magnitude step.
-        return (
-          <StepShell
-            stepIndex={clampedStep}
-            totalSteps={steps.length}
-            title="How fast does the phase-out happen?"
-            subtitle="Rates ramp linearly from the 2025 baseline at the start year down to zero at the end year."
-          >
-            <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
-              <div className="flex items-center gap-2 text-sm text-gray-700">
-                <span className="font-medium">Start year</span>
-                <YearSelect
-                  value={config.eliminate.startYear}
-                  onChange={(v) => updateEliminate({ startYear: v })}
-                />
-              </div>
-              <div className="flex items-center gap-2 text-sm text-gray-700">
-                <span className="font-medium">End year</span>
-                <YearSelect
-                  value={config.eliminate.endYear}
-                  onChange={(v) => updateEliminate({ endYear: v })}
-                />
-              </div>
-            </div>
-          </StepShell>
-        );
-
       case 'magnitude':
         if (path === 'cap') {
           return (
@@ -414,43 +378,64 @@ export default function Wizard({
             </StepShell>
           );
         }
-        // cut path: pp ↔ pct toggle + years + magnitude on one step
+        if (path === 'pp') {
+          return (
+            <StepShell
+              stepIndex={clampedStep}
+              totalSteps={steps.length}
+              title="Set the percentage-point cut"
+              subtitle="Pick the start and end year and the pp amount subtracted from every bracket at each."
+            >
+              <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
+                <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
+                  <span></span>
+                  <span>Year</span>
+                  <span>Cut</span>
+                </div>
+                <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
+                  <span className="font-medium">Start</span>
+                  <YearSelect
+                    value={config.pp.startYear}
+                    onChange={(v) => updatePp({ startYear: v })}
+                  />
+                  <PctInput
+                    value={config.pp.startPp}
+                    onChange={(v) => updatePp({ startPp: v })}
+                    max={4.7}
+                    suffix="pp"
+                  />
+                </div>
+                <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
+                  <span className="font-medium">End</span>
+                  <YearSelect
+                    value={config.pp.endYear}
+                    onChange={(v) => updatePp({ endYear: v })}
+                  />
+                  <PctInput
+                    value={config.pp.endPp}
+                    onChange={(v) => updatePp({ endPp: v })}
+                    max={4.7}
+                    suffix="pp"
+                  />
+                </div>
+                <p className="text-xs leading-5 text-gray-500">
+                  Each bracket falls by the interpolated pp amount that year,
+                  floored at 0. A 4.7 pp cut at the end year zeroes every
+                  bracket. Years before the start year are unchanged.
+                </p>
+              </div>
+            </StepShell>
+          );
+        }
+        // pct path
         return (
           <StepShell
             stepIndex={clampedStep}
             totalSteps={steps.length}
-            title="Set the cut"
-            subtitle="Choose the unit, then pick the start and end year and the cut size at each."
+            title="Set the percentage cut"
+            subtitle="Pick the start and end year and the share of each bracket's baseline rate to remove at each."
           >
-            <div className="space-y-4 rounded-2xl border border-gray-200 bg-white px-5 py-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
-                  Unit
-                </span>
-                <button
-                  type="button"
-                  onClick={() => updateCut({ unit: 'pp' })}
-                  className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    config.cut.unit === 'pp'
-                      ? 'border-primary-500 bg-primary-500 text-white'
-                      : 'border-gray-300 bg-white text-gray-700 hover:border-primary-200 hover:bg-primary-50/40'
-                  }`}
-                >
-                  Percentage points
-                </button>
-                <button
-                  type="button"
-                  onClick={() => updateCut({ unit: 'pct' })}
-                  className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    config.cut.unit === 'pct'
-                      ? 'border-primary-500 bg-primary-500 text-white'
-                      : 'border-gray-300 bg-white text-gray-700 hover:border-primary-200 hover:bg-primary-50/40'
-                  }`}
-                >
-                  Share of baseline
-                </button>
-              </div>
-
+            <div className="space-y-3 rounded-2xl border border-gray-200 bg-white px-5 py-4">
               <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
                 <span></span>
                 <span>Year</span>
@@ -459,51 +444,33 @@ export default function Wizard({
               <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
                 <span className="font-medium">Start</span>
                 <YearSelect
-                  value={config.cut.startYear}
-                  onChange={(v) => updateCut({ startYear: v })}
+                  value={config.pct.startYear}
+                  onChange={(v) => updatePct({ startYear: v })}
                 />
-                {config.cut.unit === 'pp' ? (
-                  <PctInput
-                    value={config.cut.startMag}
-                    onChange={(v) => updateCut({ startMag: v })}
-                    max={4.7}
-                    suffix="pp"
-                  />
-                ) : (
-                  <PctInput
-                    value={+(config.cut.startMag * 100).toFixed(1)}
-                    onChange={(v) => updateCut({ startMag: v / 100 })}
-                    max={100}
-                    suffix="%"
-                  />
-                )}
+                <PctInput
+                  value={+(config.pct.startShare * 100).toFixed(1)}
+                  onChange={(v) => updatePct({ startShare: v / 100 })}
+                  max={100}
+                  suffix="%"
+                />
               </div>
               <div className="grid grid-cols-[5rem_1fr_1fr] items-center gap-3 text-sm text-gray-700">
                 <span className="font-medium">End</span>
                 <YearSelect
-                  value={config.cut.endYear}
-                  onChange={(v) => updateCut({ endYear: v })}
+                  value={config.pct.endYear}
+                  onChange={(v) => updatePct({ endYear: v })}
                 />
-                {config.cut.unit === 'pp' ? (
-                  <PctInput
-                    value={config.cut.endMag}
-                    onChange={(v) => updateCut({ endMag: v })}
-                    max={4.7}
-                    suffix="pp"
-                  />
-                ) : (
-                  <PctInput
-                    value={+(config.cut.endMag * 100).toFixed(1)}
-                    onChange={(v) => updateCut({ endMag: v / 100 })}
-                    max={100}
-                    suffix="%"
-                  />
-                )}
+                <PctInput
+                  value={+(config.pct.endShare * 100).toFixed(1)}
+                  onChange={(v) => updatePct({ endShare: v / 100 })}
+                  max={100}
+                  suffix="%"
+                />
               </div>
               <p className="text-xs leading-5 text-gray-500">
-                {config.cut.unit === 'pp'
-                  ? 'Each bracket falls by the interpolated pp amount that year, floored at 0. Years before the start year are unchanged.'
-                  : 'Each bracket equals its 2025 baseline times (1 − share). 100% means a full elimination at that year.'}
+                Each bracket equals its 2025 baseline times (1 − share). 100%
+                phases the tax to zero at that year. Years before the start
+                year are unchanged.
               </p>
             </div>
           </StepShell>
@@ -615,17 +582,20 @@ export default function Wizard({
                   {config.cap.endYear}.
                 </p>
               )}
-              {path === 'cut' && (
+              {path === 'pp' && (
                 <p className="text-xs text-gray-500">
-                  {config.cut.unit === 'pp'
-                    ? `Every bracket cut by ${config.cut.startMag} pp in ${config.cut.startYear}, ramping to ${config.cut.endMag} pp in ${config.cut.endYear}.`
-                    : `Every bracket reduced by ${(config.cut.startMag * 100).toFixed(0)}% of its baseline in ${config.cut.startYear}, ramping to ${(config.cut.endMag * 100).toFixed(0)}% in ${config.cut.endYear}.`}
+                  Every bracket cut by {config.pp.startPp} pp in{' '}
+                  {config.pp.startYear}, ramping to {config.pp.endPp} pp in{' '}
+                  {config.pp.endYear}.
                 </p>
               )}
-              {path === 'eliminate' && (
+              {path === 'pct' && (
                 <p className="text-xs text-gray-500">
-                  Income tax phased to zero between {config.eliminate.startYear}
-                  {' '}and {config.eliminate.endYear}.
+                  Every bracket reduced by{' '}
+                  {(config.pct.startShare * 100).toFixed(0)}% of its baseline
+                  in {config.pct.startYear}, ramping to{' '}
+                  {(config.pct.endShare * 100).toFixed(0)}% in{' '}
+                  {config.pct.endYear}.
                 </p>
               )}
               <p className="pt-2 text-xs text-gray-500">

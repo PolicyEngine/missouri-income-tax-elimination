@@ -27,15 +27,17 @@ interface Props {
 const EDITABLE_BRACKETS = [1, 2, 3, 4, 5, 6, 7];
 
 // Teal ramp from light to dark so the highest bracket is the most
-// emphasised line. Mirrors the dashboard's primary palette.
+// emphasised line. Each step shifts darker by roughly equal amounts;
+// the lowest bracket stays readable on a white background while the
+// relative spacing between lines is preserved.
 const BRACKET_COLORS: Record<number, string> = {
-  1: '#A5F3F1',
-  2: '#7DD3D1',
-  3: '#5CB5B3',
-  4: '#3B9897',
-  5: '#1F7B7A',
-  6: '#0E5F5E',
-  7: '#003F3F',
+  1: '#5CB5B3',
+  2: '#3B9897',
+  3: '#1F7B7A',
+  4: '#15605F',
+  5: '#0E4E4D',
+  6: '#063B3A',
+  7: '#022927',
 };
 
 export default function RateLineChart({ rates }: Props) {
