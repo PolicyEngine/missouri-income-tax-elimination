@@ -21,6 +21,7 @@ import {
   buildPpRates,
   buildReform,
   defaultCustomRates,
+  unchangedYears,
 } from '@/lib/reform';
 
 export default function Home() {
@@ -173,6 +174,12 @@ function ReformImpactTab() {
     string,
     Record<string, number | boolean>
   >>({});
+  /** Snapshot of which years were detected as unchanged at the time
+   *  Done was clicked, so axis-change runYear calls keep skipping the
+   *  same years. */
+  const [submittedSkipYears, setSubmittedSkipYears] = useState<
+    Set<number> | undefined
+  >(undefined);
   const [skipHousehold, setSkipHousehold] = useState(false);
   const [triggered, setTriggered] = useState(false);
 
@@ -220,15 +227,19 @@ function ReformImpactTab() {
     const customRates = configToCustomRates(path, config);
     const baseRequest = buildBaseRequest(household);
     const reform = buildReform('custom', {}, 2027, customRates);
+    // Years where every bracket equals the 2025 baseline can skip the
+    // sim entirely; both hooks render a synthesised zero result.
+    const skipYears = unchangedYears(customRates);
     setSubmittedBaseRequest(baseRequest);
     setSubmittedReform(reform);
+    setSubmittedSkipYears(skipYears);
     setTriggered(true);
     resetHouseholdImpact();
     if (!skipHousehold) {
-      runHouseholdImpact(baseRequest, reform);
+      runHouseholdImpact(baseRequest, reform, skipYears);
     }
     resetStateImpact();
-    runStateImpact(reform);
+    runStateImpact(reform, skipYears);
   };
 
   // Live "preview" reform derived from current wizard config — updates the
@@ -319,6 +330,7 @@ function ReformImpactTab() {
                         selectedYear,
                         next,
                         submittedReform ?? {},
+                        submittedSkipYears,
                       );
                     }
                   }}
