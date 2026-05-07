@@ -29,8 +29,6 @@ function zeroHouseholdImpact(
       baseline: 0,
       reform: 0,
       difference: 0,
-      federal_eitc_change: 0,
-      state_eitc_change: 0,
       federal_tax_change: 0,
       state_tax_change: 0,
       net_income_change: 0,
