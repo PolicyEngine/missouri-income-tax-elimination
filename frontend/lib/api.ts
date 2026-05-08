@@ -335,3 +335,130 @@ export async function pollEconomicImpact(
     });
   }
 }
+
+/**
+ * Per-year budget impact returned by the server inside
+ * `result.annualImpacts`. Server uses camelCase; we mirror it here.
+ */
+export interface AnnualBudgetImpact {
+  year: string;
+  taxRevenueImpact: number;
+  federalTaxRevenueImpact: number;
+  stateTaxRevenueImpact: number;
+  benefitSpendingImpact: number;
+  budgetaryImpact: number;
+}
+
+export interface BudgetWindowResult {
+  kind: 'budgetWindow';
+  startYear: string;
+  endYear: string;
+  windowSize: number;
+  annualImpacts: AnnualBudgetImpact[];
+  totals: AnnualBudgetImpact;
+}
+
+export interface BudgetWindowProgress {
+  status: 'computing' | 'ok' | 'error';
+  progress: number | null;
+  completed_years: string[];
+  computing_years: string[];
+  queued_years: string[];
+  message: string | null;
+  error: string | null;
+}
+
+/**
+ * Poll the batch budget-window endpoint until it returns `ok` or
+ * `error`. The server queues every year in the requested window and
+ * returns aggregate progress on each call, so the client makes one
+ * polling URL instead of N parallel per-year polls.
+ *
+ * Calls `onProgress` on every intermediate response so the UI can
+ * stream completed/computing/queued year status.
+ */
+export async function pollBudgetWindowImpact(
+  policyId: number,
+  startYear: number,
+  windowSize: number,
+  onProgress?: (progress: BudgetWindowProgress) => void,
+  abortSignal?: AbortSignal,
+  baselinePolicyId: number = BASELINE_POLICY_ID,
+  region: string = 'mo',
+): Promise<BudgetWindowResult> {
+  const pollIntervalMs = 5000;
+  const url = `${PE_API_URL}/us/economy/${policyId}/over/${baselinePolicyId}/budget-window?region=${region}&start_year=${startYear}&window_size=${windowSize}`;
+
+  while (true) {
+    if (abortSignal?.aborted) {
+      throw new Error('Aborted');
+    }
+
+    const response = await fetchWithTimeout(
+      url,
+      { method: 'GET', signal: abortSignal },
+    );
+
+    let body: {
+      status?: 'computing' | 'ok' | 'error';
+      result?: BudgetWindowResult | null;
+      progress?: number | null;
+      completed_years?: string[];
+      computing_years?: string[];
+      queued_years?: string[];
+      message?: string | null;
+      error?: string | null;
+    };
+    try {
+      body = await response.json();
+    } catch {
+      throw new ApiError(
+        `Budget-window endpoint returned non-JSON (${response.status})`,
+        response.status,
+      );
+    }
+
+    if (!response.ok) {
+      throw new ApiError(
+        body?.message || body?.error || `Budget-window endpoint error: ${response.status}`,
+        response.status,
+        body,
+      );
+    }
+
+    const status = body.status ?? 'error';
+    const progress: BudgetWindowProgress = {
+      status,
+      progress: body.progress ?? null,
+      completed_years: body.completed_years ?? [],
+      computing_years: body.computing_years ?? [],
+      queued_years: body.queued_years ?? [],
+      message: body.message ?? null,
+      error: body.error ?? null,
+    };
+    if (onProgress) onProgress(progress);
+
+    if (status === 'ok') {
+      if (!body.result) {
+        throw new Error('Budget-window status=ok but no result');
+      }
+      return body.result;
+    }
+    if (status === 'error') {
+      throw new Error(body.error || body.message || 'Budget-window calculation failed');
+    }
+
+    // computing — wait and retry
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+        resolve();
+      }, pollIntervalMs);
+      const onAbort = () => {
+        clearTimeout(timeout);
+        reject(new Error('Aborted'));
+      };
+      if (abortSignal) abortSignal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+}
