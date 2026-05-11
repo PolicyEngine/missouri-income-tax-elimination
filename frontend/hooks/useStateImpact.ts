@@ -1,7 +1,12 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { createPolicy, pollEconomicImpact } from '@/lib/api';
+import {
+  createPolicy,
+  pollBudgetWindowImpact,
+  type AnnualBudgetImpact,
+  type BudgetWindowProgress,
+} from '@/lib/api';
 import type { BudgetImpact } from '@/lib/types';
 
 export interface YearImpact {
@@ -27,23 +32,18 @@ const YEARS = [
   2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035,
 ] as const;
 
-// Cap simultaneous /us/economy polls so the API doesn't abort requests
-// under load.
-const STATE_CONCURRENCY = 3;
-
-async function runWithConcurrency<T>(
-  items: readonly T[],
-  limit: number,
-  worker: (item: T) => Promise<void>,
-): Promise<void> {
-  let next = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      await worker(items[i]);
-    }
-  });
-  await Promise.all(runners);
+/** Map a server-side AnnualBudgetImpact (camelCase) onto the
+ *  snake-case BudgetImpact the rest of the app already consumes. */
+function toBudgetImpact(annual: AnnualBudgetImpact): BudgetImpact {
+  return {
+    baseline_net_income: 0,
+    budgetary_impact: annual.budgetaryImpact,
+    federal_tax_revenue_impact: annual.federalTaxRevenueImpact,
+    state_tax_revenue_impact: annual.stateTaxRevenueImpact,
+    tax_revenue_impact: annual.taxRevenueImpact,
+    benefit_spending_impact: annual.benefitSpendingImpact,
+    households: 0,
+  };
 }
 
 export function useStateImpact() {
@@ -68,7 +68,6 @@ export function useStateImpact() {
 
       // Years that match the 2025 baseline across every bracket short-circuit
       // to a zero-impact budget — no sim fires.
-      const yearsToFire = YEARS.filter((y) => !unchangedYears?.has(y));
       if (unchangedYears) {
         setYears((prev) =>
           prev.map((p) =>
@@ -79,8 +78,9 @@ export function useStateImpact() {
         );
       }
 
-      // Empty reform after stripping baseline-equal cells: every year is a
-      // no-op, skip the network entirely.
+      // Empty reform after stripping baseline-equal cells: every year is
+      // a no-op, skip the network entirely.
+      const yearsToFire = YEARS.filter((y) => !unchangedYears?.has(y));
       if (yearsToFire.length === 0) {
         setRunning(false);
         return;
@@ -88,9 +88,11 @@ export function useStateImpact() {
 
       try {
         const policyId = await createPolicy(reform);
-        // Mark remaining years as computing, then poll with bounded
-        // concurrency. Each year's setState fires independently as its
-        // simulation finishes, so results stream in progressively.
+
+        // Mark remaining years as computing immediately. The batch
+        // endpoint takes the full window and queues every year
+        // server-side, so we don't slice into contiguous ranges — any
+        // unchanged-year cache hits resolve fast on the server.
         setYears((prev) =>
           prev.map((p) =>
             unchangedYears?.has(p.year)
@@ -98,45 +100,80 @@ export function useStateImpact() {
               : { ...p, status: 'computing' as const },
           ),
         );
-        await runWithConcurrency(yearsToFire, STATE_CONCURRENCY, async (y) => {
+
+        const startYear = YEARS[0];
+        const windowSize = YEARS.length;
+        const onProgress = (progress: BudgetWindowProgress) => {
           if (controller.signal.aborted) return;
-          try {
-            const result = await pollEconomicImpact(
-              policyId,
-              y,
-              undefined,
-              controller.signal,
-            );
-            if (controller.signal.aborted) return;
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y
-                  ? {
-                      year: y,
-                      status: 'ok',
-                      budget: result.budget as BudgetImpact,
-                    }
-                  : p,
-              ),
-            );
-          } catch (e) {
-            if (controller.signal.aborted) return;
-            const message =
-              e instanceof Error ? e.message : 'Unknown error';
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y
-                  ? { year: y, status: 'error', error: message }
-                  : p,
-              ),
-            );
-          }
-        });
+          // Surface server-reported status arrays as best-effort
+          // year-level state. The server doesn't return per-year
+          // payloads until the whole batch is done, so we only flip
+          // status badges here — the budget data fills in once the
+          // batch resolves below.
+          const completed = new Set(progress.completed_years.map(Number));
+          const computing = new Set(progress.computing_years.map(Number));
+          const queued = new Set(progress.queued_years.map(Number));
+          setYears((prev) =>
+            prev.map((p) => {
+              if (unchangedYears?.has(p.year)) return p;
+              if (computing.has(p.year)) {
+                return { ...p, status: 'computing' as const };
+              }
+              if (queued.has(p.year)) {
+                return { ...p, status: 'pending' as const };
+              }
+              if (completed.has(p.year) && !p.budget) {
+                // Server has finished this year but the aggregate
+                // result hasn't returned yet; keep as computing so the
+                // chart only renders once we have actual numbers.
+                return { ...p, status: 'computing' as const };
+              }
+              return p;
+            }),
+          );
+        };
+
+        const result = await pollBudgetWindowImpact(
+          policyId,
+          startYear,
+          windowSize,
+          onProgress,
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+
+        const annualByYear = new Map<number, AnnualBudgetImpact>();
+        for (const annual of result.annualImpacts) {
+          annualByYear.set(Number(annual.year), annual);
+        }
+
+        setYears((prev) =>
+          prev.map((p) => {
+            if (unchangedYears?.has(p.year)) return p;
+            const annual = annualByYear.get(p.year);
+            if (!annual) {
+              return {
+                year: p.year,
+                status: 'error',
+                error: 'No data returned for year',
+              };
+            }
+            return {
+              year: p.year,
+              status: 'ok',
+              budget: toBudgetImpact(annual),
+            };
+          }),
+        );
       } catch (e) {
-        // createPolicy failed — mark everything as error.
+        if (controller.signal.aborted) return;
         const message = e instanceof Error ? e.message : 'Unknown error';
         setYears((prev) =>
-          prev.map((p) => ({ ...p, status: 'error', error: message })),
+          prev.map((p) =>
+            unchangedYears?.has(p.year)
+              ? p
+              : { year: p.year, status: 'error', error: message },
+          ),
         );
       } finally {
         if (!controller.signal.aborted) {
