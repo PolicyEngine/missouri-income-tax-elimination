@@ -8,50 +8,30 @@ interface Props {
   onChange: (year: number) => void;
 }
 
-/** Prev/next year navigator that matches the household-impact tab's
- *  picker. Year status (pending / computing / error) sits under the
- *  year label so the user can see what's still resolving. */
+/** Row of pill buttons matching NC's "Tax year" picker — one button per
+ *  year in the budget window. Years still computing or in error are
+ *  still selectable; the parent surfaces the right loading / error
+ *  state from the row data. */
 export default function YearPicker({ years, selectedYear, onChange }: Props) {
   if (!years.length) return null;
 
-  const minYear = years[0].year;
-  const maxYear = years[years.length - 1].year;
-  const completedCount = years.filter((y) => y.status === 'ok').length;
-  const totalCount = years.length;
-
-  const handlePrev = () => {
-    if (selectedYear > minYear) onChange(selectedYear - 1);
-  };
-  const handleNext = () => {
-    if (selectedYear < maxYear) onChange(selectedYear + 1);
-  };
-
   return (
-    <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-      <button
-        type="button"
-        onClick={handlePrev}
-        disabled={selectedYear <= minYear}
-        aria-label="Previous year"
-        className="px-3 py-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-      >
-        {'\u25C0'}
-      </button>
-      <div className="text-center">
-        <div className="text-lg font-bold text-primary">{selectedYear}</div>
-        <div className="text-xs text-gray-500">
-          {completedCount}/{totalCount} computed
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={handleNext}
-        disabled={selectedYear >= maxYear}
-        aria-label="Next year"
-        className="px-3 py-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-      >
-        {'\u25B6'}
-      </button>
+    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+      <span>Tax year:</span>
+      {years.map((y) => (
+        <button
+          key={y.year}
+          type="button"
+          onClick={() => onChange(y.year)}
+          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            selectedYear === y.year
+              ? 'bg-primary-500 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          {y.year}
+        </button>
+      ))}
     </div>
   );
 }
