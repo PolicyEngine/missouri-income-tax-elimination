@@ -83,6 +83,57 @@ async function runWithConcurrency<T>(
   await Promise.all(runners);
 }
 
+/** Map PolicyEngine's human-readable intra-decile bucket labels onto
+ *  the snake-case keys the rest of the dashboard consumes. The API
+ *  returns objects shaped like ``{ "Gain more than 5%": value, ... }``,
+ *  while components use ``gain_more_than_5pct``. */
+const INTRA_KEY_MAP: Record<string, keyof IntraDecile['all']> = {
+  'Gain more than 5%': 'gain_more_than_5pct',
+  'Gain less than 5%': 'gain_less_than_5pct',
+  'No change': 'no_change',
+  'Lose less than 5%': 'lose_less_than_5pct',
+  'Lose more than 5%': 'lose_more_than_5pct',
+};
+
+function normaliseIntraDecile(raw: unknown): IntraDecile | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const rawAll = r.all as Record<string, number> | undefined;
+  const rawDeciles = r.deciles as Record<string, number[]> | undefined;
+  if (!rawAll || !rawDeciles) return undefined;
+
+  // Quick path: data already snake-cased (zero-impact synth or already
+  // normalised upstream) — return as-is.
+  if ('gain_more_than_5pct' in rawAll) {
+    return raw as IntraDecile;
+  }
+
+  const all = {
+    gain_more_than_5pct: 0,
+    gain_less_than_5pct: 0,
+    no_change: 0,
+    lose_less_than_5pct: 0,
+    lose_more_than_5pct: 0,
+  };
+  const deciles: IntraDecile['deciles'] = {
+    gain_more_than_5pct: Array(10).fill(0),
+    gain_less_than_5pct: Array(10).fill(0),
+    no_change: Array(10).fill(0),
+    lose_less_than_5pct: Array(10).fill(0),
+    lose_more_than_5pct: Array(10).fill(0),
+  };
+  for (const [raw_key, snake_key] of Object.entries(INTRA_KEY_MAP)) {
+    if (typeof rawAll[raw_key] === 'number') {
+      all[snake_key] = rawAll[raw_key];
+    }
+    const decile_values = rawDeciles[raw_key];
+    if (Array.isArray(decile_values) && decile_values.length === 10) {
+      deciles[snake_key] = decile_values.slice() as number[];
+    }
+  }
+  return { all, deciles };
+}
+
 function extractFromResult(result: EconomyImpactResult): {
   decile?: DecileImpact;
   intra_decile?: IntraDecile;
@@ -96,9 +147,9 @@ function extractFromResult(result: EconomyImpactResult): {
   const decile =
     (raw.decile as DecileImpact | undefined) ??
     (raw.decile_impact as DecileImpact | undefined);
-  const intra_decile =
-    (raw.intra_decile as IntraDecile | undefined) ??
-    (raw.intra_decile_impact as IntraDecile | undefined);
+  const intra_decile = normaliseIntraDecile(
+    raw.intra_decile ?? raw.intra_decile_impact,
+  );
   const poverty =
     (raw.poverty as PovertyImpact | undefined) ??
     (raw.poverty_impact as PovertyImpact | undefined);
