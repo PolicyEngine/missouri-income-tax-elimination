@@ -1,16 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import DistributionalImpact from '@/components/DistributionalImpact';
 import ImpactAnalysis from '@/components/ImpactAnalysis';
 import PolicyOverview from '@/components/PolicyOverview';
+import PovertyImpact from '@/components/PovertyImpact';
 import RateLineChart from '@/components/RateLineChart';
 import StateImpact from '@/components/StateImpact';
+import WinnersLosersImpact from '@/components/WinnersLosersImpact';
 import Wizard, {
   DEFAULT_REFORM_CONFIG,
   type HouseholdProfile,
   type ReformConfig,
   type ReformPath,
 } from '@/components/Wizard';
+import { useFullEconomyImpact } from '@/hooks/useFullEconomyImpact';
 import { useStateImpact } from '@/hooks/useStateImpact';
 import { useMultiYearHouseholdImpact } from '@/hooks/useMultiYearHouseholdImpact';
 import type { HouseholdRequest } from '@/lib/types';
@@ -199,6 +203,20 @@ function ReformImpactTab() {
     reset: resetStateImpact,
   } = useStateImpact();
 
+  // Full economy-wide impacts (distributional / winners-losers / poverty)
+  // — fired in parallel with the state budget batch on Calculate.
+  const {
+    years: economyYears,
+    running: economyRunning,
+    run: runFullEconomy,
+    reset: resetFullEconomy,
+  } = useFullEconomyImpact();
+
+  // Sub-tab inside the statewide impacts section.
+  const [statewideTab, setStatewideTab] = useState<
+    'budget' | 'distributional' | 'winners' | 'poverty'
+  >('budget');
+
   // Keep household form in sync with hash changes.
   useEffect(() => {
     const handleHashChange = () => {
@@ -240,6 +258,8 @@ function ReformImpactTab() {
     }
     resetStateImpact();
     runStateImpact(reform, skipYears);
+    resetFullEconomy();
+    runFullEconomy(reform, skipYears);
   };
 
   // Live "preview" reform derived from current wizard config — updates the
@@ -357,8 +377,56 @@ function ReformImpactTab() {
             />
           )}
 
-          {/* State 10-year impact (slow) */}
-          <StateImpact years={stateYears} running={stateRunning} />
+          {/* Statewide impacts — budget, distributional, winners/losers,
+              poverty — all fired in parallel on Calculate. */}
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-1" role="tablist">
+              {(
+                [
+                  { id: 'budget', label: 'Budgetary' },
+                  { id: 'distributional', label: 'Distributional' },
+                  { id: 'winners', label: 'Winners & losers' },
+                  { id: 'poverty', label: 'Poverty' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={statewideTab === tab.id}
+                  onClick={() => setStatewideTab(tab.id)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    statewideTab === tab.id
+                      ? 'bg-primary-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {statewideTab === 'budget' && (
+              <StateImpact years={stateYears} running={stateRunning} />
+            )}
+            {statewideTab === 'distributional' && (
+              <DistributionalImpact
+                years={economyYears}
+                running={economyRunning}
+              />
+            )}
+            {statewideTab === 'winners' && (
+              <WinnersLosersImpact
+                years={economyYears}
+                running={economyRunning}
+              />
+            )}
+            {statewideTab === 'poverty' && (
+              <PovertyImpact
+                years={economyYears}
+                running={economyRunning}
+              />
+            )}
+          </div>
         </div>
       )}
     </div>
