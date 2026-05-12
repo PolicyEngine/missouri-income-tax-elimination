@@ -41,24 +41,10 @@ const YEARS = [
   2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035,
 ] as const;
 
-// Each household-impact call hits /us/calculate twice (baseline + reform),
-// so cap concurrency to keep the API from aborting requests under load.
-const HOUSEHOLD_CONCURRENCY = 3;
-
-async function runWithConcurrency<T>(
-  items: readonly T[],
-  limit: number,
-  worker: (item: T) => Promise<void>,
-): Promise<void> {
-  let next = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      await worker(items[i]);
-    }
-  });
-  await Promise.all(runners);
-}
+// /us/calculate is the household endpoint — stateless and lightweight,
+// not routed through the Modal simulation gateway that motivated the
+// original concurrency cap. Fire all years in parallel so the chart
+// fills in 1-2 seconds instead of 6-8.
 
 export function useMultiYearHouseholdImpact() {
   const [years, setYears] = useState<YearHouseholdImpact[]>([]);
@@ -84,10 +70,8 @@ export function useMultiYearHouseholdImpact() {
       );
 
       const yearsToFire = YEARS.filter((y) => !unchangedYears?.has(y));
-      await runWithConcurrency(
-        yearsToFire,
-        HOUSEHOLD_CONCURRENCY,
-        async (y) => {
+      await Promise.all(
+        yearsToFire.map(async (y) => {
           try {
             const data = await api.calculateHouseholdImpact(
               { ...baseRequest, year: y },
@@ -108,7 +92,7 @@ export function useMultiYearHouseholdImpact() {
               ),
             );
           }
-        },
+        }),
       );
 
       setRunning(false);
