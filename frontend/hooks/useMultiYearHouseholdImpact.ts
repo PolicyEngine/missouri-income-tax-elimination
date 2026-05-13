@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { api } from '@/lib/api';
+import { FETCH_CONCURRENCY, REFORM_YEARS } from '@/lib/constants';
 import type { HouseholdRequest, HouseholdImpactResponse } from '@/lib/types';
 
 export interface YearHouseholdImpact {
@@ -37,20 +38,6 @@ function zeroHouseholdImpact(
   };
 }
 
-const YEARS = [
-  2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035,
-] as const;
-
-// /us/calculate is the household endpoint — stateless and lightweight,
-// not routed through the Modal simulation gateway that motivated the
-// original concurrency cap. Bringing the cap back at 3 after dropping
-// it produced "signal is aborted without reason" / 120 s timeouts on
-// late years when 18 simultaneous round trips (9 years × baseline+reform)
-// stalled the API.
-// 4 keeps the 9-year window to 2 batches when 2027 short-circuits as a
-// baseline-equal year (1 zero + 4 + 4).
-const HOUSEHOLD_CONCURRENCY = 4;
-
 async function runWithConcurrency<T>(
   items: readonly T[],
   limit: number,
@@ -85,15 +72,15 @@ export function useMultiYearHouseholdImpact() {
       // normal /us/calculate path.
       const zero = zeroHouseholdImpact(baseRequest.max_earnings);
       setYears(
-        YEARS.map((y) =>
+        REFORM_YEARS.map((y) =>
           unchangedYears?.has(y)
             ? { year: y, status: 'ok' as const, data: zero }
             : { year: y, status: 'computing' as const },
         ),
       );
 
-      const yearsToFire = YEARS.filter((y) => !unchangedYears?.has(y));
-      await runWithConcurrency(yearsToFire, HOUSEHOLD_CONCURRENCY, async (y) => {
+      const yearsToFire = REFORM_YEARS.filter((y) => !unchangedYears?.has(y));
+      await runWithConcurrency(yearsToFire, FETCH_CONCURRENCY, async (y) => {
         try {
           const data = await api.calculateHouseholdImpact(
             { ...baseRequest, year: y },

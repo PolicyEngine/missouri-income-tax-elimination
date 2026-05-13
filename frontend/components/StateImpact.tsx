@@ -11,7 +11,7 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import type { YearImpact } from '@/hooks/useStateImpact';
+import type { YearImpact } from '@/hooks/useEconomyImpact';
 import ChartWatermark from './ChartWatermark';
 
 const COLORS = {

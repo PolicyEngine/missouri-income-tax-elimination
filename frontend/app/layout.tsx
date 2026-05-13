@@ -2,7 +2,6 @@ import Script from 'next/script';
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
-import Providers from '@/components/Providers';
 
 const GA_ID = 'G-2YHG89FY0N';
 
@@ -70,11 +69,7 @@ export default function RootLayout({
           `}
         </Script>
       </head>
-      <body>
-        <Providers>
-          {children}
-        </Providers>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

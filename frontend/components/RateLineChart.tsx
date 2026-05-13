@@ -57,7 +57,7 @@ export default function RateLineChart({ rates }: Props) {
     <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4">
       <div className="flex items-baseline justify-between gap-2 mb-3">
         <h3 className="text-sm font-semibold text-gray-800">Rates over time</h3>
-        <span className="text-xs text-gray-500">marginal rate, by bracket</span>
+        <span className="text-xs text-gray-500">Marginal rate, by bracket</span>
       </div>
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>

@@ -1,6 +1,6 @@
 'use client';
 
-import type { YearEconomyImpact } from '@/hooks/useFullEconomyImpact';
+import type { YearEconomyImpact } from '@/hooks/useEconomyImpact';
 
 interface Props {
   years: YearEconomyImpact[];
