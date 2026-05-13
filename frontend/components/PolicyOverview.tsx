@@ -142,17 +142,17 @@ export default function PolicyOverview() {
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
             <h4 className="font-semibold text-gray-800 mb-2">
-              Missouri Department of Revenue
+              Calculations powered by
             </h4>
             <ul className="text-sm text-gray-700 space-y-1">
               <li>
                 <a
-                  href="https://dor.mo.gov/taxation/individual/"
+                  href="https://github.com/PolicyEngine/policyengine.py"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-primary-600 hover:underline"
                 >
-                  Individual income tax information
+                  policyengine v4.4.3
                 </a>
               </li>
             </ul>
