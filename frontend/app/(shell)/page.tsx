@@ -14,10 +14,15 @@ import Wizard, {
   type ReformConfig,
   type ReformPath,
 } from '@/components/Wizard';
-import { useFullEconomyImpact } from '@/hooks/useFullEconomyImpact';
-import { useStateImpact } from '@/hooks/useStateImpact';
+import { useEconomyImpact } from '@/hooks/useEconomyImpact';
 import { useMultiYearHouseholdImpact } from '@/hooks/useMultiYearHouseholdImpact';
 import type { HouseholdRequest } from '@/lib/types';
+import {
+  DEFAULT_SELECTED_YEAR,
+  HOUSEHOLD_DEFAULTS,
+  HOUSEHOLD_MAX_EARNINGS,
+  SPOUSE_DEFAULT_AGE,
+} from '@/lib/constants';
 import { parseHashParams } from '@/lib/embedding';
 import {
   buildCapRates,
@@ -151,14 +156,14 @@ function ReformImpactTab() {
   // Initial household values, optionally hydrated from URL hash.
   const initial = useMemo<HouseholdProfile>(() => {
     if (typeof window === 'undefined') {
-      return { income: 50000, age: 35, married: false, dependents: [5] };
+      return { ...HOUSEHOLD_DEFAULTS };
     }
     const params = parseHashParams(window.location.hash);
     return {
-      income: params.income ?? 50000,
-      age: params.age ?? 35,
-      married: params.married ?? false,
-      dependents: params.dependents ?? [5],
+      income: params.income ?? HOUSEHOLD_DEFAULTS.income,
+      age: params.age ?? HOUSEHOLD_DEFAULTS.age,
+      married: params.married ?? HOUSEHOLD_DEFAULTS.married,
+      dependents: params.dependents ?? HOUSEHOLD_DEFAULTS.dependents,
     };
   }, []);
 
@@ -166,8 +171,8 @@ function ReformImpactTab() {
   const [path, setPath] = useState<ReformPath | null>(null);
   const [config, setConfig] = useState<ReformConfig>(DEFAULT_REFORM_CONFIG);
   const [showResults, setShowResults] = useState(false);
-  const maxEarnings = 400000;
-  const [selectedYear, setSelectedYear] = useState(2027);
+  const maxEarnings = HOUSEHOLD_MAX_EARNINGS;
+  const [selectedYear, setSelectedYear] = useState(DEFAULT_SELECTED_YEAR);
 
   // Submission state — what the running queries are scoped to.
   const [submittedBaseRequest, setSubmittedBaseRequest] = useState<Omit<
@@ -195,22 +200,14 @@ function ReformImpactTab() {
     reset: resetHouseholdImpact,
   } = useMultiYearHouseholdImpact();
 
-  // 10-year state impact orchestration.
-  const {
-    years: stateYears,
-    running: stateRunning,
-    run: runStateImpact,
-    reset: resetStateImpact,
-  } = useStateImpact();
-
-  // Full economy-wide impacts (distributional / winners-losers / poverty)
-  // — fired in parallel with the state budget batch on Calculate.
+  // One /us/economy poll per year feeds all four statewide tabs —
+  // budget data, decile, intra-decile, poverty all come back together.
   const {
     years: economyYears,
     running: economyRunning,
-    run: runFullEconomy,
-    reset: resetFullEconomy,
-  } = useFullEconomyImpact();
+    run: runEconomyImpact,
+    reset: resetEconomyImpact,
+  } = useEconomyImpact();
 
   // Sub-tab inside the statewide impacts section.
   const [statewideTab, setStatewideTab] = useState<
@@ -234,7 +231,7 @@ function ReformImpactTab() {
 
   const buildBaseRequest = (h: HouseholdProfile): Omit<HouseholdRequest, 'year'> => ({
     age_head: h.age,
-    age_spouse: h.married ? 35 : null,
+    age_spouse: h.married ? SPOUSE_DEFAULT_AGE : null,
     dependent_ages: h.dependents,
     income: h.income,
     max_earnings: maxEarnings,
@@ -256,10 +253,8 @@ function ReformImpactTab() {
     if (!skipHousehold) {
       runHouseholdImpact(baseRequest, reform, skipYears);
     }
-    resetStateImpact();
-    runStateImpact(reform, skipYears);
-    resetFullEconomy();
-    runFullEconomy(reform, skipYears);
+    resetEconomyImpact();
+    runEconomyImpact(reform, skipYears);
   };
 
   // Live "preview" reform derived from current wizard config — updates the
@@ -373,7 +368,7 @@ function ReformImpactTab() {
             </div>
 
             {statewideTab === 'budget' && (
-              <StateImpact years={stateYears} running={stateRunning} />
+              <StateImpact years={economyYears} running={economyRunning} />
             )}
             {statewideTab === 'distributional' && (
               <DistributionalImpact

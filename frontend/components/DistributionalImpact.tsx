@@ -12,7 +12,7 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import type { YearEconomyImpact } from '@/hooks/useFullEconomyImpact';
+import type { YearEconomyImpact } from '@/hooks/useEconomyImpact';
 import ChartWatermark from './ChartWatermark';
 import YearPicker from './YearPicker';
 

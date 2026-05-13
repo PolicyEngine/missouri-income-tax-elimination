@@ -2,7 +2,9 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { createPolicy, pollEconomicImpact } from '@/lib/api';
+import { FETCH_CONCURRENCY, REFORM_YEARS } from '@/lib/constants';
 import type {
+  BudgetImpact,
   DecileImpact,
   EconomyImpactResult,
   IntraDecile,
@@ -13,6 +15,7 @@ import type {
 export interface YearEconomyImpact {
   year: number;
   status: 'pending' | 'computing' | 'ok' | 'error';
+  budget?: BudgetImpact;
   decile?: DecileImpact;
   intra_decile?: IntraDecile;
   poverty?: PovertyImpact;
@@ -20,19 +23,22 @@ export interface YearEconomyImpact {
   error?: string;
 }
 
-const YEARS = [
-  2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035,
-] as const;
+/** StateImpact still consumes a hook-local YearImpact alias. Re-export
+ *  so existing imports work without each consumer renaming. */
+export type YearImpact = YearEconomyImpact;
 
-// Cap parallel /us/economy polls so the hosted API doesn't abort
-// requests under load (matches the cap that was in useStateImpact
-// before the budget-window batch endpoint replaced it).
-// 4 keeps the 9-year window to 2 batches when 2027 short-circuits as a
-// baseline-equal year (1 zero + 4 + 4).
-const ECONOMY_CONCURRENCY = 4;
+/** Synthesised zero-impact budget for baseline-equal years — skips the
+ *  /us/economy round trip and lets StateImpact draw a flat zero line. */
+const ZERO_BUDGET: BudgetImpact = {
+  baseline_net_income: 0,
+  budgetary_impact: 0,
+  federal_tax_revenue_impact: 0,
+  state_tax_revenue_impact: 0,
+  tax_revenue_impact: 0,
+  benefit_spending_impact: 0,
+  households: 0,
+};
 
-/** Empty decile/intra/poverty payload for years where the reform
- * matches the 2025 baseline across every bracket. */
 const EMPTY_DECILE: DecileImpact = {
   average: Object.fromEntries(
     Array.from({ length: 10 }, (_, i) => [String(i + 1), 0]),
@@ -70,25 +76,35 @@ const EMPTY_POVERTY: PovertyImpact = {
   },
 };
 
+const ZERO_YEAR: Omit<YearEconomyImpact, 'year' | 'status'> = {
+  budget: ZERO_BUDGET,
+  decile: EMPTY_DECILE,
+  intra_decile: EMPTY_INTRA_DECILE,
+  poverty: EMPTY_POVERTY,
+  by_income_bracket: [],
+};
+
 async function runWithConcurrency<T>(
   items: readonly T[],
   limit: number,
   worker: (item: T) => Promise<void>,
 ): Promise<void> {
   let next = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      await worker(items[i]);
-    }
-  });
+  const runners = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (next < items.length) {
+        const i = next++;
+        await worker(items[i]);
+      }
+    },
+  );
   await Promise.all(runners);
 }
 
-/** Map PolicyEngine's human-readable intra-decile bucket labels onto
- *  the snake-case keys the rest of the dashboard consumes. The API
- *  returns objects shaped like ``{ "Gain more than 5%": value, ... }``,
- *  while components use ``gain_more_than_5pct``. */
+/** PolicyEngine's /us/economy returns intra-decile buckets keyed by
+ *  human-readable strings ("Gain more than 5%"); the rest of the app
+ *  speaks snake-case. Translate on the way out. */
 const INTRA_KEY_MAP: Record<string, keyof IntraDecile['all']> = {
   'Gain more than 5%': 'gain_more_than_5pct',
   'Gain less than 5%': 'gain_less_than_5pct',
@@ -104,8 +120,6 @@ function normaliseIntraDecile(raw: unknown): IntraDecile | undefined {
   const rawDeciles = r.deciles as Record<string, number[]> | undefined;
   if (!rawAll || !rawDeciles) return undefined;
 
-  // Quick path: data already snake-cased (zero-impact synth or already
-  // normalised upstream) — return as-is.
   if ('gain_more_than_5pct' in rawAll) {
     return raw as IntraDecile;
   }
@@ -137,15 +151,14 @@ function normaliseIntraDecile(raw: unknown): IntraDecile | undefined {
 }
 
 function extractFromResult(result: EconomyImpactResult): {
+  budget?: BudgetImpact;
   decile?: DecileImpact;
   intra_decile?: IntraDecile;
   poverty?: PovertyImpact;
   by_income_bracket?: IncomeBracket[];
 } {
-  // PolicyEngine's /us/economy result wraps the fields directly on the
-  // top-level object. Some deployments nest them under separate keys —
-  // surface both shapes so we don't lose data on a key rename.
   const raw = result as Record<string, unknown>;
+  const budget = raw.budget as BudgetImpact | undefined;
   const decile =
     (raw.decile as DecileImpact | undefined) ??
     (raw.decile_impact as DecileImpact | undefined);
@@ -158,10 +171,17 @@ function extractFromResult(result: EconomyImpactResult): {
   const by_income_bracket = raw.by_income_bracket as
     | IncomeBracket[]
     | undefined;
-  return { decile, intra_decile, poverty, by_income_bracket };
+  return { budget, decile, intra_decile, poverty, by_income_bracket };
 }
 
-export function useFullEconomyImpact() {
+/**
+ * Single per-year /us/economy poll feeds all four statewide tabs —
+ * Budgetary (budget), Distributional (decile), Winners & losers
+ * (intra_decile), Poverty (poverty). Previously useStateImpact and
+ * useFullEconomyImpact each fired their own batch, doubling the API
+ * load for identical years.
+ */
+export function useEconomyImpact() {
   const [years, setYears] = useState<YearEconomyImpact[]>([]);
   const [running, setRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -171,7 +191,6 @@ export function useFullEconomyImpact() {
       reform: Record<string, Record<string, number | boolean>>,
       unchangedYears?: Set<number>,
     ) => {
-      // Cancel any in-flight run.
       if (abortRef.current) {
         abortRef.current.abort();
       }
@@ -180,24 +199,14 @@ export function useFullEconomyImpact() {
 
       setRunning(true);
 
-      // Seed every year as pending; unchanged years immediately resolve
-      // to the empty payload so the chart can render zeros without a
-      // network round trip.
-      const initial: YearEconomyImpact[] = YEARS.map((y) =>
+      const initial: YearEconomyImpact[] = REFORM_YEARS.map((y) =>
         unchangedYears?.has(y)
-          ? {
-              year: y,
-              status: 'ok',
-              decile: EMPTY_DECILE,
-              intra_decile: EMPTY_INTRA_DECILE,
-              poverty: EMPTY_POVERTY,
-              by_income_bracket: [],
-            }
+          ? { year: y, status: 'ok', ...ZERO_YEAR }
           : { year: y, status: 'pending' },
       );
       setYears(initial);
 
-      const yearsToFire = YEARS.filter((y) => !unchangedYears?.has(y));
+      const yearsToFire = REFORM_YEARS.filter((y) => !unchangedYears?.has(y));
       if (yearsToFire.length === 0) {
         setRunning(false);
         return;
@@ -206,7 +215,6 @@ export function useFullEconomyImpact() {
       try {
         const policyId = await createPolicy(reform);
 
-        // Mark the network-bound years as computing up front.
         setYears((prev) =>
           prev.map((p) =>
             unchangedYears?.has(p.year)
@@ -215,7 +223,7 @@ export function useFullEconomyImpact() {
           ),
         );
 
-        await runWithConcurrency(yearsToFire, ECONOMY_CONCURRENCY, async (y) => {
+        await runWithConcurrency(yearsToFire, FETCH_CONCURRENCY, async (y) => {
           if (controller.signal.aborted) return;
           try {
             const result = await pollEconomicImpact(
@@ -228,13 +236,7 @@ export function useFullEconomyImpact() {
             const extracted = extractFromResult(result);
             setYears((prev) =>
               prev.map((p) =>
-                p.year === y
-                  ? {
-                      year: y,
-                      status: 'ok',
-                      ...extracted,
-                    }
-                  : p,
+                p.year === y ? { year: y, status: 'ok', ...extracted } : p,
               ),
             );
           } catch (e) {
@@ -250,8 +252,6 @@ export function useFullEconomyImpact() {
           }
         });
       } catch (e) {
-        // createPolicy or batch-runner failure — surface the error on
-        // every network-bound year so the UI shows the banner.
         if (!controller.signal.aborted) {
           const message = e instanceof Error ? e.message : 'Unknown error';
           setYears((prev) =>
