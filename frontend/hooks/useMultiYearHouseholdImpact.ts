@@ -43,8 +43,31 @@ const YEARS = [
 
 // /us/calculate is the household endpoint — stateless and lightweight,
 // not routed through the Modal simulation gateway that motivated the
-// original concurrency cap. Fire all years in parallel so the chart
-// fills in 1-2 seconds instead of 6-8.
+// original concurrency cap. Bringing the cap back at 3 after dropping
+// it produced "signal is aborted without reason" / 120 s timeouts on
+// late years when 18 simultaneous round trips (9 years × baseline+reform)
+// stalled the API.
+// 4 keeps the 9-year window to 2 batches when 2027 short-circuits as a
+// baseline-equal year (1 zero + 4 + 4).
+const HOUSEHOLD_CONCURRENCY = 4;
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runners = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (next < items.length) {
+        const i = next++;
+        await worker(items[i]);
+      }
+    },
+  );
+  await Promise.all(runners);
+}
 
 export function useMultiYearHouseholdImpact() {
   const [years, setYears] = useState<YearHouseholdImpact[]>([]);
@@ -70,30 +93,28 @@ export function useMultiYearHouseholdImpact() {
       );
 
       const yearsToFire = YEARS.filter((y) => !unchangedYears?.has(y));
-      await Promise.all(
-        yearsToFire.map(async (y) => {
-          try {
-            const data = await api.calculateHouseholdImpact(
-              { ...baseRequest, year: y },
-              reform,
-            );
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y ? { year: y, status: 'ok', data } : p,
-              ),
-            );
-          } catch (e) {
-            const message = e instanceof Error ? e.message : 'Unknown error';
-            setYears((prev) =>
-              prev.map((p) =>
-                p.year === y
-                  ? { year: y, status: 'error', error: message }
-                  : p,
-              ),
-            );
-          }
-        }),
-      );
+      await runWithConcurrency(yearsToFire, HOUSEHOLD_CONCURRENCY, async (y) => {
+        try {
+          const data = await api.calculateHouseholdImpact(
+            { ...baseRequest, year: y },
+            reform,
+          );
+          setYears((prev) =>
+            prev.map((p) =>
+              p.year === y ? { year: y, status: 'ok', data } : p,
+            ),
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Unknown error';
+          setYears((prev) =>
+            prev.map((p) =>
+              p.year === y
+                ? { year: y, status: 'error', error: message }
+                : p,
+            ),
+          );
+        }
+      });
 
       setRunning(false);
     },
