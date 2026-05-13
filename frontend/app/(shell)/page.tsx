@@ -166,7 +166,7 @@ function ReformImpactTab() {
   const [path, setPath] = useState<ReformPath | null>(null);
   const [config, setConfig] = useState<ReformConfig>(DEFAULT_REFORM_CONFIG);
   const [showResults, setShowResults] = useState(false);
-  const [maxEarnings, setMaxEarnings] = useState(200000);
+  const maxEarnings = 400000;
   const [selectedYear, setSelectedYear] = useState(2027);
 
   // Submission state — what the running queries are scoped to.
@@ -333,39 +333,6 @@ function ReformImpactTab() {
       {/* Full-width impacts section, only after the user clicks Done. */}
       {triggered && (
         <div className="space-y-6 pt-4">
-          {!skipHousehold && (
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white px-5 py-3 text-xs text-gray-600">
-              <span>Chart x-axis max:</span>
-              {[200000, 500000, 1000000].map((v) => (
-                <button
-                  key={v}
-                  onClick={() => {
-                    setMaxEarnings(v);
-                    const next = submittedBaseRequest
-                      ? { ...submittedBaseRequest, max_earnings: v }
-                      : null;
-                    setSubmittedBaseRequest(next);
-                    if (next) {
-                      runYearHousehold(
-                        selectedYear,
-                        next,
-                        submittedReform ?? {},
-                        submittedSkipYears,
-                      );
-                    }
-                  }}
-                  className={`px-3 py-1 rounded-full font-medium transition-colors ${
-                    maxEarnings === v
-                      ? 'bg-primary-500 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  ${v >= 1000000 ? `${v / 1000000}M` : `${v / 1000}k`}
-                </button>
-              ))}
-            </div>
-          )}
-
           {/* Household impact (fast) */}
           {!skipHousehold && submittedBaseRequest && (
             <ImpactAnalysis
