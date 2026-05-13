@@ -27,7 +27,9 @@ const YEARS = [
 // Cap parallel /us/economy polls so the hosted API doesn't abort
 // requests under load (matches the cap that was in useStateImpact
 // before the budget-window batch endpoint replaced it).
-const ECONOMY_CONCURRENCY = 3;
+// 4 keeps the 9-year window to 2 batches when 2027 short-circuits as a
+// baseline-equal year (1 zero + 4 + 4).
+const ECONOMY_CONCURRENCY = 4;
 
 /** Empty decile/intra/poverty payload for years where the reform
  * matches the 2025 baseline across every bracket. */

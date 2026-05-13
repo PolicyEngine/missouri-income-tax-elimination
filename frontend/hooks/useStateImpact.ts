@@ -31,7 +31,9 @@ const YEARS = [
 // /budget-window batch endpoint was meant to replace this loop but the
 // gateway-side JSONDecodeError on window_size=9 means we fall back to
 // per-year polls, same pattern as Distributional/Winners-Losers/Poverty.
-const ECONOMY_CONCURRENCY = 3;
+// 4 keeps the 9-year window to 2 batches when 2027 short-circuits as a
+// baseline-equal year (1 zero + 4 + 4).
+const ECONOMY_CONCURRENCY = 4;
 
 async function runWithConcurrency<T>(
   items: readonly T[],

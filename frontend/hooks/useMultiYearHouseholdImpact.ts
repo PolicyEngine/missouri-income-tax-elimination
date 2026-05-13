@@ -47,7 +47,9 @@ const YEARS = [
 // it produced "signal is aborted without reason" / 120 s timeouts on
 // late years when 18 simultaneous round trips (9 years × baseline+reform)
 // stalled the API.
-const HOUSEHOLD_CONCURRENCY = 3;
+// 4 keeps the 9-year window to 2 batches when 2027 short-circuits as a
+// baseline-equal year (1 zero + 4 + 4).
+const HOUSEHOLD_CONCURRENCY = 4;
 
 async function runWithConcurrency<T>(
   items: readonly T[],
