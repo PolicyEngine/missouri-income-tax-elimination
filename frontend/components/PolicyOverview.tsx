@@ -152,7 +152,7 @@ export default function PolicyOverview() {
                   rel="noopener noreferrer"
                   className="text-primary-600 hover:underline"
                 >
-                  policyengine v4.4.3
+                  policyengine v4.4.4
                 </a>
               </li>
             </ul>
