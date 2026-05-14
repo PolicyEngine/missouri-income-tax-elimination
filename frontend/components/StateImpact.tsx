@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import type { YearImpact } from '@/hooks/useEconomyImpact';
 import ChartWatermark from './ChartWatermark';
+import Spinner from './Spinner';
 
 const COLORS = {
   positive: 'var(--chart-positive)',
@@ -124,8 +125,16 @@ export default function StateImpact({ years, running }: Props) {
 
       {running && (
         <div className="rounded-lg border border-primary-200 bg-primary-50 p-4 text-sm text-primary-800">
-          Simulating Missouri impact &mdash; <strong>{completed}</strong> of{' '}
-          <strong>{total}</strong> years complete&hellip;
+          <Spinner
+            size="sm"
+            label={
+              <>
+                Simulating Missouri impact &mdash;{' '}
+                <strong>{completed}</strong> of <strong>{total}</strong> years
+                complete&hellip;
+              </>
+            }
+          />
         </div>
       )}
 

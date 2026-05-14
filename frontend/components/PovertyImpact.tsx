@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import type { YearEconomyImpact } from '@/hooks/useEconomyImpact';
 import ChartWatermark from './ChartWatermark';
+import Spinner from './Spinner';
 import YearPicker from './YearPicker';
 
 const COLORS = {
@@ -97,8 +98,16 @@ export default function PovertyImpact({ years, running }: Props) {
 
       {running && (
         <div className="rounded-lg border border-primary-200 bg-primary-50 p-4 text-sm text-primary-800">
-          Computing economy-wide impacts &mdash; <strong>{completed}</strong>{' '}
-          of <strong>{total}</strong> years complete&hellip;
+          <Spinner
+            size="sm"
+            label={
+              <>
+                Computing economy-wide impacts &mdash;{' '}
+                <strong>{completed}</strong> of <strong>{total}</strong> years
+                complete&hellip;
+              </>
+            }
+          />
         </div>
       )}
 
@@ -109,8 +118,8 @@ export default function PovertyImpact({ years, running }: Props) {
       />
 
       {yearData?.status === 'computing' || yearData?.status === 'pending' ? (
-        <div className="bg-white border rounded-lg p-12 text-center text-gray-500">
-          Computing {selectedYear}&hellip;
+        <div className="bg-white border rounded-lg">
+          <Spinner label={`Computing poverty impact for ${selectedYear}\u2026`} />
         </div>
       ) : yearData?.status === 'error' ? (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
