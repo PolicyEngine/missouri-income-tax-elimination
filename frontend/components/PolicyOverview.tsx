@@ -9,8 +9,8 @@ export default function PolicyOverview() {
           Missouri Income Tax Elimination
         </h2>
         <p className="text-gray-700 mb-4">
-          Missouri House Joint Resolutions <strong>173</strong> and
-          <strong> 174</strong> propose a constitutional amendment that would
+          Missouri House Joint Resolutions <strong>173</strong> and{' '}
+          <strong>174</strong> propose a constitutional amendment that would
           authorize the General Assembly to reduce or eliminate Missouri&apos;s
           individual income tax. Because the measure amends the state
           constitution, it must be ratified by Missouri voters in a statewide
@@ -41,10 +41,9 @@ export default function PolicyOverview() {
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
             <h3 className="font-semibold text-gray-800 mb-2">Scenarios modeled</h3>
             <p className="text-sm text-gray-600">
-              Four reform types are available: a percentage-point reduction
+              Three reform types are available: a percentage-point reduction
               applied to every bracket rate, a cap on the top marginal rate,
-              elimination of the top bracket, or full repeal of the income
-              tax.
+              or elimination of the top bracket.
             </p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
@@ -52,7 +51,7 @@ export default function PolicyOverview() {
             <p className="text-sm text-gray-600">
               Results are static estimates that do not incorporate behavioral
               responses. State revenue impacts are projected for fiscal years
-              2026&ndash;2035 using PolicyEngine&apos;s microsimulation of
+              2027&ndash;2035 using PolicyEngine&apos;s microsimulation of
               Missouri tax units.
             </p>
           </div>
