@@ -9,8 +9,8 @@ export default function PolicyOverview() {
           Missouri Income Tax Elimination
         </h2>
         <p className="text-gray-700 mb-4">
-          Missouri House Joint Resolutions <strong>173</strong> and{' '}
-          <strong>174</strong> propose a constitutional amendment that would
+          Missouri House Joint Resolutions 173 and 174 propose a
+          constitutional amendment that would
           authorize the General Assembly to reduce or eliminate Missouri&apos;s
           individual income tax. Because the measure amends the state
           constitution, it must be ratified by Missouri voters in a statewide
