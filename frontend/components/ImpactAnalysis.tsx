@@ -117,10 +117,14 @@ export default function ImpactAnalysis({
     const isApiNotUpdated =
       errorMessage.includes('500') || errorMessage.includes('too many values');
     body = (
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-        <h2 className="text-yellow-800 font-semibold mb-2">
+      <div
+        role="alert"
+        aria-live="polite"
+        className="bg-yellow-50 border border-yellow-200 rounded-lg p-6"
+      >
+        <p className="text-yellow-800 font-semibold mb-2">
           Household calculator temporarily unavailable for {selectedYear}
-        </h2>
+        </p>
         {isApiNotUpdated ? (
           <p className="text-yellow-700">
             The PolicyEngine API is temporarily unavailable. Please try again in a moment.
