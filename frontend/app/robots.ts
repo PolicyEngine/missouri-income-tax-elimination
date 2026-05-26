@@ -1,35 +1,19 @@
 import type { MetadataRoute } from 'next';
-import { headers } from 'next/headers';
 
-const CANONICAL_HOST = 'policyengine.org';
+const CANONICAL_URL =
+  'https://policyengine.org/us/missouri-income-tax-elimination';
 
 /**
- * Host-aware robots.txt:
- * - On the canonical host (policyengine.org), allow indexing and expose the sitemap.
- * - On preview/standalone deployments (e.g. *.vercel.app), disallow indexing so
- *   the canonical embedded version is the only one search engines see.
+ * Static robots.txt pointing at the canonical PolicyEngine-hosted version.
+ * (A previous host-aware variant used next/headers, which forced robots.txt
+ * to be server-rendered on demand and broke the Vercel static deployment.)
  */
-export default async function robots(): Promise<MetadataRoute.Robots> {
-  const hdrs = await headers();
-  const host =
-    hdrs.get('x-forwarded-host') ?? hdrs.get('host') ?? CANONICAL_HOST;
-  const isCanonical = host === CANONICAL_HOST;
-
-  if (!isCanonical) {
-    return {
-      rules: {
-        userAgent: '*',
-        disallow: '/',
-      },
-    };
-  }
-
+export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: '*',
       allow: '/',
     },
-    sitemap:
-      'https://policyengine.org/us/missouri-income-tax-elimination/sitemap.xml',
+    sitemap: `${CANONICAL_URL}/sitemap.xml`,
   };
 }

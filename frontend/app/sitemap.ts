@@ -1,21 +1,14 @@
 import type { MetadataRoute } from 'next';
-import { headers } from 'next/headers';
 
-const CANONICAL_HOST = 'policyengine.org';
 const CANONICAL_URL =
   'https://policyengine.org/us/missouri-income-tax-elimination';
 
 /**
- * Host-aware sitemap: only emit entries on the canonical host. Preview /
- * standalone deployments return an empty sitemap so crawlers can't index a
- * duplicate copy of the page.
+ * Static sitemap pointing at the canonical PolicyEngine-hosted version.
+ * (A previous host-aware variant used next/headers, which forced sitemap.xml
+ * to be server-rendered on demand and broke the Vercel static deployment.)
  */
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const hdrs = await headers();
-  const host =
-    hdrs.get('x-forwarded-host') ?? hdrs.get('host') ?? CANONICAL_HOST;
-  if (host !== CANONICAL_HOST) return [];
-
+export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
       url: CANONICAL_URL,
