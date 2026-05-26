@@ -1,13 +1,32 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import DistributionalImpact from '@/components/DistributionalImpact';
-import ImpactAnalysis from '@/components/ImpactAnalysis';
+import dynamic from 'next/dynamic';
 import PolicyOverview from '@/components/PolicyOverview';
-import PovertyImpact from '@/components/PovertyImpact';
-import RateLineChart from '@/components/RateLineChart';
-import StateImpact from '@/components/StateImpact';
-import WinnersLosersImpact from '@/components/WinnersLosersImpact';
+
+// Lazy-load chart-heavy components (recharts is ~500KB and only renders after
+// the user advances past the wizard / clicks Done). ssr: false keeps recharts
+// out of the server bundle and the initial JS payload.
+const RateLineChart = dynamic(() => import('@/components/RateLineChart'), {
+  ssr: false,
+});
+const ImpactAnalysis = dynamic(() => import('@/components/ImpactAnalysis'), {
+  ssr: false,
+});
+const StateImpact = dynamic(() => import('@/components/StateImpact'), {
+  ssr: false,
+});
+const DistributionalImpact = dynamic(
+  () => import('@/components/DistributionalImpact'),
+  { ssr: false },
+);
+const WinnersLosersImpact = dynamic(
+  () => import('@/components/WinnersLosersImpact'),
+  { ssr: false },
+);
+const PovertyImpact = dynamic(() => import('@/components/PovertyImpact'), {
+  ssr: false,
+});
 import Wizard, {
   DEFAULT_REFORM_CONFIG,
   type HouseholdProfile,
@@ -46,7 +65,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main id="main-content" className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-primary-500 text-white py-8 px-4 shadow-md">
         <div className="max-w-6xl mx-auto">

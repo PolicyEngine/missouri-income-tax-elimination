@@ -1,5 +1,7 @@
 'use client';
 
+import Image from 'next/image';
+
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
 /**
@@ -9,15 +11,18 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
  */
 export default function ChartWatermark() {
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <Image
       src={`${basePath}/policyengine-logo-teal.png`}
       alt=""
       aria-hidden="true"
+      width={80}
+      height={20}
+      unoptimized
       style={{
         display: 'block',
         marginLeft: 'auto',
         width: 80,
+        height: 'auto',
         opacity: 0.8,
       }}
     />
