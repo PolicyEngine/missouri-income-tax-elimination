@@ -231,6 +231,53 @@ describe("calculateHouseholdImpact", () => {
     });
   });
 
+  it("retries a calculation once after a gateway failure", async () => {
+    // The dashboard API answers 504 when the Public API takes over 100
+    // seconds. The Public API still finishes and caches the result, so a
+    // second request usually gets it at once.
+    vi.useFakeTimers();
+    let calculations = 0;
+    const recordedRequests = stubFetch(() => {
+      calculations += 1;
+      return calculations === 1
+        ? jsonResponse(504, {
+            status: "error",
+            message: "The Public API did not answer in time.",
+            result: null,
+          })
+        : okAnswer(
+            calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000]),
+          );
+    });
+
+    const impact = api.calculateHouseholdImpact(householdRequest, reform);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(impact).resolves.toMatchObject({ x_axis_max: 400000 });
+    expect(recordedRequests).toHaveLength(3);
+  });
+
+  it("shows a gateway failure that happens again", async () => {
+    vi.useFakeTimers();
+    const recordedRequests = stubFetch(() =>
+      jsonResponse(504, {
+        status: "error",
+        message: "The Public API did not answer in time.",
+        result: null,
+      }),
+    );
+
+    const failure = failureOf(api.calculateHouseholdImpact(householdRequest, reform));
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(await failure).toMatchObject({
+      message: expect.stringMatching(/HTTP 504.*did not answer in time/),
+      status: 504,
+    });
+    // Two calculations, each tried twice.
+    expect(recordedRequests).toHaveLength(4);
+  });
+
   it("gives up after five minutes without an answer", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
