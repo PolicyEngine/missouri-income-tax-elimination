@@ -33,6 +33,30 @@ export const BASELINE_POLICY_ID = 2;
 /** How long a household calculation may take before the page gives up on it. */
 const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
 
+/**
+ * Brief gateway failures. The dashboard API answers 504 when the Public API
+ * takes over 100 seconds; the Public API still finishes and caches the
+ * result, so the one retry usually gets it at once.
+ */
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+/** How long to wait before the one retry of a gateway failure. */
+const GATEWAY_RETRY_WAIT_MILLISECONDS = 2_000;
+
+function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 /** A dashboard API request failed; `message` is written for the user. */
 export class DashboardApiFailure extends Error {
   override name = 'DashboardApiFailure';
@@ -108,11 +132,26 @@ async function calculateHousehold(
     () => controller.abort(),
     CALCULATION_TIMEOUT_MILLISECONDS,
   );
-  try {
-    return await policyengine.calculateHousehold<CalculatedHousehold>(
+  const calculate = () =>
+    policyengine.calculateHousehold<CalculatedHousehold>(
       { country: 'us', household, policy },
       { signal: controller.signal },
     );
+  try {
+    try {
+      return await calculate();
+    } catch (error) {
+      // One retry of a brief gateway failure, within the same time limit.
+      if (
+        !(error instanceof PolicyEngineApiError) ||
+        error.status === null ||
+        !RETRYABLE_STATUSES.has(error.status)
+      ) {
+        throw error;
+      }
+      await waitFor(GATEWAY_RETRY_WAIT_MILLISECONDS, controller.signal);
+      return await calculate();
+    }
   } catch (error) {
     if (controller.signal.aborted) {
       throw new DashboardApiFailure(
