@@ -1,11 +1,22 @@
 /**
- * PolicyEngine API client for the Missouri Income Tax Elimination dashboard.
+ * PolicyEngine calculations for the Missouri Income Tax Elimination
+ * dashboard, through www.policyengine.org's dashboard API.
+ *
+ * The page never calls the PolicyEngine Public API itself: the dashboard
+ * API's server adds PolicyEngine's credential and forwards household
+ * calculations, stored policies and economy comparisons to the Public API.
  *
  * Unlike the Utah/SC dashboards, reforms here are user-supplied. The API
  * client accepts an explicit `reform` dict. The household impact is computed
  * as (reform) minus (baseline current law), so positive numbers mean the
  * household gains under the reform.
  */
+
+import {
+  createPolicyEngineApiClient,
+  EconomyComparisonTimeoutError,
+  PolicyEngineApiError,
+} from '@policyengine/api-client';
 
 import type {
   HouseholdRequest,
@@ -14,78 +25,108 @@ import type {
 } from './types';
 import { buildHouseholdSituation, interpolate } from './household';
 
-const PE_API_URL = 'https://api.policyengine.org';
+const policyengine = createPolicyEngineApiClient();
 
 /** PolicyEngine's baseline policy id for current law (US). */
 export const BASELINE_POLICY_ID = 2;
 
-class ApiError extends Error {
-  status: number;
-  response: unknown;
-  constructor(message: string, status: number, response?: unknown) {
+/** How long a household calculation may take before the page gives up on it. */
+const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
+
+/** A dashboard API request failed; `message` is written for the user. */
+export class DashboardApiFailure extends Error {
+  override name = 'DashboardApiFailure';
+
+  constructor(
+    message: string,
+    /** The dashboard API's HTTP status, or null when no answer was read. */
+    readonly status: number | null,
+  ) {
     super(message);
-    this.status = status;
-    this.response = response;
   }
 }
 
-async function fetchWithTimeout(
-  url: string,
-  options: RequestInit,
-  timeout = 300000
-): Promise<Response> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    // If caller passed an abortSignal, merge with our timeout controller.
-    return await fetch(url, {
-      ...options,
-      signal: options.signal ?? controller.signal,
-    });
-  } finally {
-    clearTimeout(id);
+function dashboardApiMessage(body: unknown): string | null {
+  if (typeof body === 'object' && body !== null) {
+    const message = (body as { message?: unknown }).message;
+    if (typeof message === 'string' && message.length > 0) {
+      return message;
+    }
   }
+  return null;
 }
 
-interface PEApiCalculateResponse {
-  result: {
-    households: Record<string, Record<string, Record<string, number[]>>>;
-    people: Record<string, Record<string, Record<string, number[]>>>;
-    tax_units: Record<string, Record<string, Record<string, number[]>>>;
-  };
-}
-
-async function peCalculate(
-  body: Record<string, unknown>
-): Promise<PEApiCalculateResponse> {
-  const response = await fetchWithTimeout(
-    `${PE_API_URL}/us/calculate`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }
-  );
-  if (!response.ok) {
-    let errorBody;
-    try {
-      errorBody = await response.json();
-    } catch {
-      errorBody = await response.text();
-    }
-    const errorMessage =
-      typeof errorBody === 'object' && errorBody && 'message' in errorBody
-        ? (errorBody as { message: string }).message
-        : typeof errorBody === 'string'
-          ? errorBody
-          : JSON.stringify(errorBody);
-    throw new ApiError(
-      `PolicyEngine API error: ${response.status} - ${errorMessage}`,
-      response.status,
-      errorBody
+/**
+ * Turns a failure of the dashboard API client into a message for the user.
+ * `action` completes "PolicyEngine could not …".
+ */
+function failureFor(
+  error: PolicyEngineApiError,
+  action: string,
+): DashboardApiFailure {
+  if (error.status === null) {
+    // On another origin, such as the dashboard's own host, the firewall's
+    // 429 has no CORS headers, so the browser reports a network failure.
+    // So does the dashboard API's 403 for an origin it does not allow.
+    return new DashboardApiFailure(
+      "PolicyEngine's calculation service could not be reached. If many " +
+        'calculations have been run from your network in the last minute, ' +
+        'wait a minute and try again.',
+      null,
     );
   }
-  return response.json();
+  if (error.status === 429) {
+    return new DashboardApiFailure(
+      'Too many calculations have been run from your network in the last ' +
+        'minute. Wait a minute and try again.',
+      429,
+    );
+  }
+  const detail = dashboardApiMessage(error.body) ?? 'Try again in a few minutes.';
+  return new DashboardApiFailure(
+    `PolicyEngine could not ${action} (HTTP ${error.status}): ${detail}`,
+    error.status,
+  );
+}
+
+/** Values over the income axis, keyed by year. */
+type ValuesByYear = Record<string, number[]>;
+
+/** The parts of a calculated household this page reads. */
+interface CalculatedHousehold {
+  people: Record<string, Record<string, ValuesByYear>>;
+  households: Record<string, Record<string, ValuesByYear>>;
+  tax_units: Record<string, Record<string, ValuesByYear>>;
+}
+
+async function calculateHousehold(
+  household: Record<string, unknown>,
+  policy?: Record<string, unknown>,
+): Promise<CalculatedHousehold> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    CALCULATION_TIMEOUT_MILLISECONDS,
+  );
+  try {
+    return await policyengine.calculateHousehold<CalculatedHousehold>(
+      { country: 'us', household, policy },
+      { signal: controller.signal },
+    );
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new DashboardApiFailure(
+        'The calculation took longer than five minutes. Try again.',
+        null,
+      );
+    }
+    if (error instanceof PolicyEngineApiError) {
+      throw failureFor(error, 'calculate this household');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export const api = {
@@ -103,37 +144,37 @@ export const api = {
 
     // Run baseline and reform in parallel.
     const hasReform = Object.keys(reform).length > 0;
+    // Each resolves with the calculated household (the Public API's
+    // `result`).
     const [baselineResult, reformResult] = await Promise.all([
-      peCalculate({ household }),
-      hasReform
-        ? peCalculate({ household, policy: reform })
-        : peCalculate({ household }),
+      calculateHousehold(household),
+      calculateHousehold(household, hasReform ? reform : undefined),
     ]);
 
     const baselineNetIncome: number[] =
-      baselineResult.result.households['your household'][
+      baselineResult.households['your household'][
         'household_net_income'
       ][yearStr];
     const reformNetIncome: number[] =
-      reformResult.result.households['your household'][
+      reformResult.households['your household'][
         'household_net_income'
       ][yearStr];
     const incomeRange: number[] =
-      baselineResult.result.people['you']['employment_income'][yearStr];
+      baselineResult.people['you']['employment_income'][yearStr];
 
     const baselineStateTax: number[] =
-      baselineResult.result.tax_units['your tax unit']['mo_income_tax'][
+      baselineResult.tax_units['your tax unit']['mo_income_tax'][
         yearStr
       ];
     const reformStateTax: number[] =
-      reformResult.result.tax_units['your tax unit']['mo_income_tax'][
+      reformResult.tax_units['your tax unit']['mo_income_tax'][
         yearStr
       ];
 
     const baselineFederalTax: number[] =
-      baselineResult.result.tax_units['your tax unit']['income_tax'][yearStr];
+      baselineResult.tax_units['your tax unit']['income_tax'][yearStr];
     const reformFederalTax: number[] =
-      reformResult.result.tax_units['your tax unit']['income_tax'][yearStr];
+      reformResult.tax_units['your tax unit']['income_tax'][yearStr];
 
     // Impact = reform - baseline (conventional direction).
     const netIncomeChange = reformNetIncome.map(
@@ -202,96 +243,30 @@ export const api = {
   },
 };
 
+
 /**
- * Create a PolicyEngine policy from a reform dict. Returns a numeric
- * `policy_id` usable with `/us/economy/...` endpoints.
+ * Store a reform as a PolicyEngine policy. Returns its numeric ID, usable
+ * in economy comparisons.
  */
 export async function createPolicy(
   policy: Record<string, Record<string, number | boolean>>,
 ): Promise<number> {
-  const response = await fetchWithTimeout(
-    `${PE_API_URL}/us/policy`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: policy }),
+  try {
+    return await policyengine.createPolicy({ country: 'us', parameters: policy });
+  } catch (error) {
+    if (error instanceof PolicyEngineApiError) {
+      throw failureFor(error, 'store this reform');
     }
-  );
-  if (!response.ok) {
-    let errorBody;
-    try {
-      errorBody = await response.json();
-    } catch {
-      errorBody = await response.text();
-    }
-    throw new ApiError(
-      `PolicyEngine /us/policy error: ${response.status}`,
-      response.status,
-      errorBody,
-    );
+    throw error;
   }
-  const body = await response.json();
-  const policyId: number | undefined =
-    body?.result?.policy_id ?? body?.policy_id;
-  if (typeof policyId !== 'number') {
-    throw new ApiError(
-      `PolicyEngine /us/policy returned no policy_id: ${JSON.stringify(body)}`,
-      500,
-      body,
-    );
-  }
-  return policyId;
-}
-
-export interface EconomicImpactResponse {
-  status: 'ok' | 'computing' | 'error';
-  result: EconomyImpactResult | null;
-  message: string | null;
 }
 
 /**
- * Fetch the economic impact for the given policy and year, scoped to
- * Missouri. Returns the raw status / result / message triple from the
- * PolicyEngine API.
- */
-export async function getEconomicImpact(
-  policyId: number,
-  year: number,
-  baselinePolicyId: number = BASELINE_POLICY_ID,
-  abortSignal?: AbortSignal,
-): Promise<EconomicImpactResponse> {
-  const url = `${PE_API_URL}/us/economy/${policyId}/over/${baselinePolicyId}?region=mo&time_period=${year}`;
-  const response = await fetchWithTimeout(
-    url,
-    { method: 'GET', signal: abortSignal },
-  );
-  if (!response.ok) {
-    let errorBody;
-    try {
-      errorBody = await response.json();
-    } catch {
-      errorBody = await response.text();
-    }
-    const message =
-      typeof errorBody === 'object' && errorBody && 'message' in errorBody
-        ? (errorBody as { message: string }).message
-        : typeof errorBody === 'string'
-          ? errorBody
-          : JSON.stringify(errorBody);
-    return { status: 'error', result: null, message };
-  }
-
-  const body = await response.json();
-  const status = (body?.status ?? 'error') as 'ok' | 'computing' | 'error';
-  const result = (body?.result ?? null) as EconomyImpactResult | null;
-  const message = (body?.message ?? null) as string | null;
-  return { status, result, message };
-}
-
-/**
- * Poll `getEconomicImpact` until it returns `ok` or `error`. Calls
- * `onUpdate` with each intermediate status. Respects `abortSignal` for
- * cancellation.
+ * Poll the statewide (Missouri) comparison of a policy with the baseline for
+ * one year until it is ready. Calls `onUpdate` with each intermediate status
+ * ("computing"). Respects `abortSignal` for cancellation. The client reads
+ * every 5 seconds, waits out a rate-limited read the page can see, and gives
+ * up after 30 minutes.
  */
 export async function pollEconomicImpact(
   policyId: number,
@@ -300,165 +275,39 @@ export async function pollEconomicImpact(
   abortSignal?: AbortSignal,
   baselinePolicyId: number = BASELINE_POLICY_ID,
 ): Promise<EconomyImpactResult> {
-  const pollIntervalMs = 5000;
-  while (true) {
+  let result: EconomyImpactResult | null;
+  try {
+    result = await policyengine.compareEconomy<EconomyImpactResult>(
+      {
+        country: 'us',
+        policy: policyId,
+        baseline: baselinePolicyId,
+        region: 'mo',
+        year,
+      },
+      {
+        signal: abortSignal,
+        onProgress: onUpdate ? (answer) => onUpdate(answer.status) : undefined,
+      },
+    );
+  } catch (error) {
     if (abortSignal?.aborted) {
       throw new Error('Aborted');
     }
-    const { status, result, message } = await getEconomicImpact(
-      policyId,
-      year,
-      baselinePolicyId,
-      abortSignal,
-    );
-    if (onUpdate) onUpdate(status);
-    if (status === 'ok') {
-      if (!result) {
-        throw new Error('API returned ok status but no result');
-      }
-      return result;
-    }
-    if (status === 'error') {
-      throw new Error(message || 'Economic impact calculation failed');
-    }
-    // status === 'computing' — wait and retry
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
-        resolve();
-      }, pollIntervalMs);
-      const onAbort = () => {
-        clearTimeout(timeout);
-        reject(new Error('Aborted'));
-      };
-      if (abortSignal) abortSignal.addEventListener('abort', onAbort, { once: true });
-    });
-  }
-}
-
-/**
- * Per-year budget impact returned by the server inside
- * `result.annualImpacts`. Server uses camelCase; we mirror it here.
- */
-export interface AnnualBudgetImpact {
-  year: string;
-  taxRevenueImpact: number;
-  federalTaxRevenueImpact: number;
-  stateTaxRevenueImpact: number;
-  benefitSpendingImpact: number;
-  budgetaryImpact: number;
-}
-
-export interface BudgetWindowResult {
-  kind: 'budgetWindow';
-  startYear: string;
-  endYear: string;
-  windowSize: number;
-  annualImpacts: AnnualBudgetImpact[];
-  totals: AnnualBudgetImpact;
-}
-
-export interface BudgetWindowProgress {
-  status: 'computing' | 'ok' | 'error';
-  progress: number | null;
-  completed_years: string[];
-  computing_years: string[];
-  queued_years: string[];
-  message: string | null;
-  error: string | null;
-}
-
-/**
- * Poll the batch budget-window endpoint until it returns `ok` or
- * `error`. The server queues every year in the requested window and
- * returns aggregate progress on each call, so the client makes one
- * polling URL instead of N parallel per-year polls.
- *
- * Calls `onProgress` on every intermediate response so the UI can
- * stream completed/computing/queued year status.
- */
-export async function pollBudgetWindowImpact(
-  policyId: number,
-  startYear: number,
-  windowSize: number,
-  onProgress?: (progress: BudgetWindowProgress) => void,
-  abortSignal?: AbortSignal,
-  baselinePolicyId: number = BASELINE_POLICY_ID,
-  region: string = 'mo',
-): Promise<BudgetWindowResult> {
-  const pollIntervalMs = 5000;
-  const url = `${PE_API_URL}/us/economy/${policyId}/over/${baselinePolicyId}/budget-window?region=${region}&start_year=${startYear}&window_size=${windowSize}`;
-
-  while (true) {
-    if (abortSignal?.aborted) {
-      throw new Error('Aborted');
-    }
-
-    const response = await fetchWithTimeout(
-      url,
-      { method: 'GET', signal: abortSignal },
-    );
-
-    let body: {
-      status?: 'computing' | 'ok' | 'error';
-      result?: BudgetWindowResult | null;
-      progress?: number | null;
-      completed_years?: string[];
-      computing_years?: string[];
-      queued_years?: string[];
-      message?: string | null;
-      error?: string | null;
-    };
-    try {
-      body = await response.json();
-    } catch {
-      throw new ApiError(
-        `Budget-window endpoint returned non-JSON (${response.status})`,
-        response.status,
+    if (error instanceof EconomyComparisonTimeoutError) {
+      throw new DashboardApiFailure(
+        `The statewide calculation for ${year} did not finish within 30 ` +
+          'minutes. Try again later.',
+        null,
       );
     }
-
-    if (!response.ok) {
-      throw new ApiError(
-        body?.message || body?.error || `Budget-window endpoint error: ${response.status}`,
-        response.status,
-        body,
-      );
+    if (error instanceof PolicyEngineApiError) {
+      throw failureFor(error, `compare the economy for ${year}`);
     }
-
-    const status = body.status ?? 'error';
-    const progress: BudgetWindowProgress = {
-      status,
-      progress: body.progress ?? null,
-      completed_years: body.completed_years ?? [],
-      computing_years: body.computing_years ?? [],
-      queued_years: body.queued_years ?? [],
-      message: body.message ?? null,
-      error: body.error ?? null,
-    };
-    if (onProgress) onProgress(progress);
-
-    if (status === 'ok') {
-      if (!body.result) {
-        throw new Error('Budget-window status=ok but no result');
-      }
-      return body.result;
-    }
-    if (status === 'error') {
-      throw new Error(body.error || body.message || 'Budget-window calculation failed');
-    }
-
-    // computing — wait and retry
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
-        resolve();
-      }, pollIntervalMs);
-      const onAbort = () => {
-        clearTimeout(timeout);
-        reject(new Error('Aborted'));
-      };
-      if (abortSignal) abortSignal.addEventListener('abort', onAbort, { once: true });
-    });
+    throw error;
   }
+  if (!result) {
+    throw new Error('API returned ok status but no result');
+  }
+  return result;
 }
