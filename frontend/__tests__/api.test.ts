@@ -323,7 +323,38 @@ describe("calculateHouseholdImpact", () => {
     await Promise.all(impacts);
   });
 
-  it("shows a gateway failure that happens again", async () => {
+  it("tries a third time when the dashboard API times out twice", async () => {
+    // A calculation that takes the Public API 130 to 300 seconds outlasts
+    // both 100-second waits; the third request, 30 seconds after the second
+    // 504, reads the result the first computation stored.
+    vi.useFakeTimers();
+    let reformCalculations = 0;
+    const recordedRequests = stubFetch((request) => {
+      const isReform = (request.body as { policy?: unknown }).policy !== undefined;
+      if (isReform) {
+        reformCalculations += 1;
+        if (reformCalculations < 3) {
+          return jsonResponse(504, {
+            status: "error",
+            message: "The Public API did not answer in time.",
+            result: null,
+          });
+        }
+      }
+      return okAnswer(
+        calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000]),
+      );
+    });
+
+    const impact = api.calculateHouseholdImpact(householdRequest, reform);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await expect(impact).resolves.toMatchObject({ x_axis_max: 400000 });
+    // One current-law request and three reform requests.
+    expect(recordedRequests).toHaveLength(4);
+  });
+
+  it("shows a gateway failure that keeps happening", async () => {
     vi.useFakeTimers();
     const recordedRequests = stubFetch(() =>
       jsonResponse(504, {
@@ -334,14 +365,14 @@ describe("calculateHouseholdImpact", () => {
     );
 
     const failure = failureOf(api.calculateHouseholdImpact(householdRequest, reform));
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(60_000);
 
     expect(await failure).toMatchObject({
       message: expect.stringMatching(/HTTP 504.*did not answer in time/),
       status: 504,
     });
-    // Two calculations, each tried twice.
-    expect(recordedRequests).toHaveLength(4);
+    // Two calculations, each tried three times.
+    expect(recordedRequests).toHaveLength(6);
   });
 
   it("gives up after five minutes without an answer", async () => {
