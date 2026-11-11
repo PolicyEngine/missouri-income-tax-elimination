@@ -34,15 +34,21 @@ export const BASELINE_POLICY_ID = 2;
 /** How long a household calculation may take before the page gives up on it. */
 const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
 
-/** Gateway failures that are worth one retry. */
+/** Gateway failures that are worth trying again. */
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 
 /**
- * How long to wait before the one retry. A 504 means the dashboard API gave
- * up after 100 seconds while the Public API is still calculating; it caches
- * the result when it finishes, so the retry waits for that rather than
- * starting the same calculation again. A 502 or 503 is brief.
+ * How many times to send a household calculation. A 504 means the
+ * dashboard API gave up after 100 seconds while the Public API is still
+ * calculating; the Public API stores the result when it finishes (Cloud Run
+ * lets it run for 300 seconds), so the page asks again, 30 seconds after
+ * each 504, until the stored result can be read or the five minutes are
+ * up. A request that arrives while the first computation is still running
+ * starts a second one, which is why the waits are not shorter. A 502 or 503
+ * is brief and gets one retry after 2 seconds.
  */
+const ATTEMPTS_AFTER_TIMEOUT = 3;
+const ATTEMPTS_AFTER_GATEWAY_FAILURE = 2;
 const RETRY_WAIT_MILLISECONDS_AFTER_TIMEOUT = 30_000;
 const RETRY_WAIT_MILLISECONDS = 2_000;
 
@@ -145,24 +151,30 @@ async function calculateHousehold(
     );
   };
   try {
-    try {
-      return await calculate();
-    } catch (error) {
-      // One retry of a gateway failure, within the same time limit.
-      if (
-        !(error instanceof PolicyEngineApiError) ||
-        error.status === null ||
-        !RETRYABLE_STATUSES.has(error.status)
-      ) {
-        throw error;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await calculate();
+      } catch (error) {
+        // Try again after a gateway failure, within the same time limit.
+        if (
+          !(error instanceof PolicyEngineApiError) ||
+          error.status === null ||
+          !RETRYABLE_STATUSES.has(error.status)
+        ) {
+          throw error;
+        }
+        const isTimeout = error.status === 504;
+        const attempts = isTimeout
+          ? ATTEMPTS_AFTER_TIMEOUT
+          : ATTEMPTS_AFTER_GATEWAY_FAILURE;
+        if (attempt >= attempts) {
+          throw error;
+        }
+        await waitFor(
+          isTimeout ? RETRY_WAIT_MILLISECONDS_AFTER_TIMEOUT : RETRY_WAIT_MILLISECONDS,
+          controller.signal,
+        );
       }
-      await waitFor(
-        error.status === 504
-          ? RETRY_WAIT_MILLISECONDS_AFTER_TIMEOUT
-          : RETRY_WAIT_MILLISECONDS,
-        controller.signal,
-      );
-      return await calculate();
     }
   } catch (error) {
     if (timedOut) {
