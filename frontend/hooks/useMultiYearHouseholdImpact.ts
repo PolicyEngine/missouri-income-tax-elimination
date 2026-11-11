@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { FETCH_CONCURRENCY, REFORM_YEARS } from '@/lib/constants';
 import type { HouseholdRequest, HouseholdImpactResponse } from '@/lib/types';
@@ -59,6 +59,9 @@ async function runWithConcurrency<T>(
 export function useMultiYearHouseholdImpact() {
   const [years, setYears] = useState<YearHouseholdImpact[]>([]);
   const [running, setRunning] = useState(false);
+  // The run in progress. A new run cancels it, so its remaining years are
+  // not calculated and its late answers are ignored.
+  const runRef = useRef<AbortController | null>(null);
 
   const run = useCallback(
     async (
@@ -66,6 +69,9 @@ export function useMultiYearHouseholdImpact() {
       reform: Record<string, Record<string, number | boolean>> = {},
       unchangedYears?: Set<number>,
     ) => {
+      runRef.current?.abort();
+      const controller = new AbortController();
+      runRef.current = controller;
       setRunning(true);
       // Years where every bracket equals baseline get a synthesised
       // zero-impact payload up front; remaining years go through the
@@ -81,17 +87,21 @@ export function useMultiYearHouseholdImpact() {
 
       const yearsToFire = REFORM_YEARS.filter((y) => !unchangedYears?.has(y));
       await runWithConcurrency(yearsToFire, FETCH_CONCURRENCY, async (y) => {
+        if (controller.signal.aborted) return;
         try {
           const data = await api.calculateHouseholdImpact(
             { ...baseRequest, year: y },
             reform,
+            controller.signal,
           );
+          if (controller.signal.aborted) return;
           setYears((prev) =>
             prev.map((p) =>
               p.year === y ? { year: y, status: 'ok', data } : p,
             ),
           );
         } catch (e) {
+          if (controller.signal.aborted) return;
           const message = e instanceof Error ? e.message : 'Unknown error';
           setYears((prev) =>
             prev.map((p) =>
@@ -103,7 +113,9 @@ export function useMultiYearHouseholdImpact() {
         }
       });
 
-      setRunning(false);
+      if (!controller.signal.aborted) {
+        setRunning(false);
+      }
     },
     [],
   );
@@ -155,6 +167,8 @@ export function useMultiYearHouseholdImpact() {
   );
 
   const reset = useCallback(() => {
+    runRef.current?.abort();
+    runRef.current = null;
     setYears([]);
     setRunning(false);
   }, []);

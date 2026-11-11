@@ -18,6 +18,7 @@ import {
   PolicyEngineApiError,
 } from '@policyengine/api-client';
 
+import { createCallLimiter, waitFor } from './callLimiter';
 import type {
   HouseholdRequest,
   HouseholdImpactResponse,
@@ -33,29 +34,24 @@ export const BASELINE_POLICY_ID = 2;
 /** How long a household calculation may take before the page gives up on it. */
 const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
 
-/**
- * Brief gateway failures. The dashboard API answers 504 when the Public API
- * takes over 100 seconds; the Public API still finishes and caches the
- * result, so the one retry usually gets it at once.
- */
+/** Gateway failures that are worth one retry. */
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 
-/** How long to wait before the one retry of a gateway failure. */
-const GATEWAY_RETRY_WAIT_MILLISECONDS = 2_000;
+/**
+ * How long to wait before the one retry. A 504 means the dashboard API gave
+ * up after 100 seconds while the Public API is still calculating; it caches
+ * the result when it finishes, so the retry waits for that rather than
+ * starting the same calculation again. A 502 or 503 is brief.
+ */
+const RETRY_WAIT_MILLISECONDS_AFTER_TIMEOUT = 30_000;
+const RETRY_WAIT_MILLISECONDS = 2_000;
 
-function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, milliseconds);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
+/**
+ * Household calculations, retries included, start at most 15 times in any
+ * minute: half of the dashboard API's limit of 30 a minute for one address,
+ * as the policyengine-api-access skill asks. One "Done" needs up to 18.
+ */
+export const householdCalculationLimit = createCallLimiter(15, 60_000);
 
 /** A dashboard API request failed; `message` is written for the user. */
 export class DashboardApiFailure extends Error {
@@ -125,23 +121,34 @@ interface CalculatedHousehold {
 
 async function calculateHousehold(
   household: Record<string, unknown>,
-  policy?: Record<string, unknown>,
+  policy: Record<string, unknown> | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<CalculatedHousehold> {
   const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(),
-    CALCULATION_TIMEOUT_MILLISECONDS,
-  );
-  const calculate = () =>
-    policyengine.calculateHousehold<CalculatedHousehold>(
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, CALCULATION_TIMEOUT_MILLISECONDS);
+  // The page cancels a run when the user starts a new one.
+  const onCancel = () => controller.abort(signal?.reason);
+  if (signal?.aborted) {
+    onCancel();
+  } else {
+    signal?.addEventListener('abort', onCancel, { once: true });
+  }
+  const calculate = async () => {
+    await householdCalculationLimit.acquire(controller.signal);
+    return policyengine.calculateHousehold<CalculatedHousehold>(
       { country: 'us', household, policy },
       { signal: controller.signal },
     );
+  };
   try {
     try {
       return await calculate();
     } catch (error) {
-      // One retry of a brief gateway failure, within the same time limit.
+      // One retry of a gateway failure, within the same time limit.
       if (
         !(error instanceof PolicyEngineApiError) ||
         error.status === null ||
@@ -149,15 +156,23 @@ async function calculateHousehold(
       ) {
         throw error;
       }
-      await waitFor(GATEWAY_RETRY_WAIT_MILLISECONDS, controller.signal);
+      await waitFor(
+        error.status === 504
+          ? RETRY_WAIT_MILLISECONDS_AFTER_TIMEOUT
+          : RETRY_WAIT_MILLISECONDS,
+        controller.signal,
+      );
       return await calculate();
     }
   } catch (error) {
-    if (controller.signal.aborted) {
+    if (timedOut) {
       throw new DashboardApiFailure(
         'The calculation took longer than five minutes. Try again.',
         null,
       );
+    }
+    if (signal?.aborted) {
+      throw signal.reason;
     }
     if (error instanceof PolicyEngineApiError) {
       throw failureFor(error, 'calculate this household');
@@ -165,6 +180,7 @@ async function calculateHousehold(
     throw error;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onCancel);
   }
 }
 
@@ -173,10 +189,13 @@ export const api = {
    * Calculate household impact by running the baseline and reform household
    * simulations in parallel. Returns a `HouseholdImpactResponse` where
    * positive numbers mean the household nets more under the reform.
+   * Aborting `signal` cancels both calculations, and the promise rejects
+   * with the signal's reason.
    */
   async calculateHouseholdImpact(
     request: HouseholdRequest,
     reform: Record<string, Record<string, number | boolean>> = {},
+    signal?: AbortSignal,
   ): Promise<HouseholdImpactResponse> {
     const household = buildHouseholdSituation(request);
     const yearStr = String(request.year);
@@ -186,8 +205,8 @@ export const api = {
     // Each resolves with the calculated household (the Public API's
     // `result`).
     const [baselineResult, reformResult] = await Promise.all([
-      calculateHousehold(household),
-      calculateHousehold(household, hasReform ? reform : undefined),
+      calculateHousehold(household, undefined, signal),
+      calculateHousehold(household, hasReform ? reform : undefined, signal),
     ]);
 
     const baselineNetIncome: number[] =

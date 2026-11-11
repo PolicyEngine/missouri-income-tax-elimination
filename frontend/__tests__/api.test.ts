@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api, createPolicy, pollEconomicImpact } from "@/lib/api";
+import {
+  api,
+  createPolicy,
+  householdCalculationLimit,
+  pollEconomicImpact,
+} from "@/lib/api";
 import { buildHouseholdSituation } from "@/lib/household";
 import type { HouseholdRequest } from "@/lib/types";
 
@@ -96,6 +101,8 @@ async function failureOf(promise: Promise<unknown>): Promise<unknown> {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  // The limit is shared by the page; each test starts with a fresh minute.
+  householdCalculationLimit.clear();
 });
 
 describe("calculateHouseholdImpact", () => {
@@ -287,11 +294,25 @@ describe("calculateHouseholdImpact", () => {
     // Half of the dashboard API's limit of 30 a minute, as the
     // policyengine-api-access skill asks; one "Done" needs up to 18.
     vi.useFakeTimers();
+    const years = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035];
+    const forEveryYear = (values: number[]) =>
+      Object.fromEntries(years.map((year) => [String(year), values]));
     const recordedRequests = stubFetch(() =>
-      okAnswer(calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000])),
+      okAnswer({
+        people: { you: { employment_income: forEveryYear([0, 100000]) } },
+        tax_units: {
+          "your tax unit": {
+            income_tax: forEveryYear([0, 9000]),
+            mo_income_tax: forEveryYear([0, 4000]),
+          },
+        },
+        households: {
+          "your household": { household_net_income: forEveryYear([0, 90000]) },
+        },
+      }),
     );
 
-    const impacts = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035].map(
+    const impacts = years.map(
       (year) => api.calculateHouseholdImpact({ ...householdRequest, year }, reform),
     );
     await vi.advanceTimersByTimeAsync(0);
