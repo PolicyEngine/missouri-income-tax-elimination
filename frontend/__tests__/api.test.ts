@@ -231,10 +231,34 @@ describe("calculateHouseholdImpact", () => {
     });
   });
 
-  it("retries a calculation once after a gateway failure", async () => {
+  it("retries a brief gateway failure once after two seconds", async () => {
+    vi.useFakeTimers();
+    let calculations = 0;
+    const recordedRequests = stubFetch(() => {
+      calculations += 1;
+      return calculations === 1
+        ? jsonResponse(502, {
+            status: "error",
+            message: "The Public API could not be reached.",
+            result: null,
+          })
+        : okAnswer(
+            calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000]),
+          );
+    });
+
+    const impact = api.calculateHouseholdImpact(householdRequest, reform);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(impact).resolves.toMatchObject({ x_axis_max: 400000 });
+    expect(recordedRequests).toHaveLength(3);
+  });
+
+  it("waits 30 seconds before retrying after the dashboard API's timeout", async () => {
     // The dashboard API answers 504 when the Public API takes over 100
-    // seconds. The Public API still finishes and caches the result, so a
-    // second request usually gets it at once.
+    // seconds. The Public API still finishes and caches the result, so the
+    // retry waits for it to finish instead of starting the same calculation
+    // again at once.
     vi.useFakeTimers();
     let calculations = 0;
     const recordedRequests = stubFetch(() => {
@@ -251,10 +275,31 @@ describe("calculateHouseholdImpact", () => {
     });
 
     const impact = api.calculateHouseholdImpact(householdRequest, reform);
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(recordedRequests).toHaveLength(2);
 
+    await vi.advanceTimersByTimeAsync(1_000);
     await expect(impact).resolves.toMatchObject({ x_axis_max: 400000 });
     expect(recordedRequests).toHaveLength(3);
+  });
+
+  it("sends at most 15 household calculations in any minute", async () => {
+    // Half of the dashboard API's limit of 30 a minute, as the
+    // policyengine-api-access skill asks; one "Done" needs up to 18.
+    vi.useFakeTimers();
+    const recordedRequests = stubFetch(() =>
+      okAnswer(calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000])),
+    );
+
+    const impacts = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035].map(
+      (year) => api.calculateHouseholdImpact({ ...householdRequest, year }, reform),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recordedRequests).toHaveLength(15);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(recordedRequests).toHaveLength(18);
+    await Promise.all(impacts);
   });
 
   it("shows a gateway failure that happens again", async () => {
@@ -268,7 +313,7 @@ describe("calculateHouseholdImpact", () => {
     );
 
     const failure = failureOf(api.calculateHouseholdImpact(householdRequest, reform));
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(30_000);
 
     expect(await failure).toMatchObject({
       message: expect.stringMatching(/HTTP 504.*did not answer in time/),
