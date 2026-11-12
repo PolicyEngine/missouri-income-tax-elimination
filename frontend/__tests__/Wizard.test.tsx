@@ -70,6 +70,19 @@ describe('Wizard', () => {
     expect(onDone).not.toHaveBeenCalled();
   });
 
+  it('explains the pause beside "Done"', () => {
+    const doneButton = renderLastStep({
+      calculationPauseSeconds: 42,
+      householdSkipped: false,
+      onDone: vi.fn(),
+    });
+
+    expect(doneButton.closest('div')?.parentElement?.textContent).toContain(
+      'Everyone on your network, such as a workshop or an office, shares a ' +
+        'limit on calculations a minute. This page can calculate again in 42 s.',
+    );
+  });
+
   it('lets "Done" run the statewide comparisons when the household is skipped', () => {
     const onDone = vi.fn();
 

@@ -243,9 +243,11 @@ describe("calculateHouseholdImpact", () => {
     expect(
       await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
     ).toMatchObject({
-      message: expect.stringMatching(
-        /everyone on your network, such as a workshop or an office, shares a limit on calculations a minute.*can calculate again in a minute/i,
-      ),
+      // The countdown beside "Done" says when the page can calculate
+      // again, so the message stays true after the minute.
+      message:
+        "Everyone on your network, such as a workshop or an office, shares " +
+        "a limit on calculations a minute, and it has been reached.",
       status: 429,
       rateLimited: true,
     });
@@ -264,12 +266,36 @@ describe("calculateHouseholdImpact", () => {
     expect(
       await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
     ).toMatchObject({
-      message: expect.stringMatching(
-        /could not be reached.*everyone on your network, such as a workshop or an office, shares a limit on calculations a minute.*can calculate again in a minute/i,
-      ),
+      message:
+        "PolicyEngine's calculation service could not be reached. Everyone " +
+        "on your network, such as a workshop or an office, shares a limit " +
+        "on calculations a minute, which may have been reached.",
       status: null,
       rateLimited: true,
     });
+  });
+
+  it("reports a network failure on www.policyengine.org without pausing", async () => {
+    // There the page and the dashboard API share an origin, so the
+    // firewall's 429 is readable: no answer means a network failure.
+    vi.stubGlobal("location", { origin: "https://www.policyengine.org" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+
+    expect(
+      await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
+    ).toMatchObject({
+      message:
+        "PolicyEngine's calculation service could not be reached. Check " +
+        "your connection and try again.",
+      status: null,
+      rateLimited: false,
+    });
+    expect(householdCalculationPauseRemaining()).toBe(0);
   });
 
   it("shows the server's message and status for other failures", async () => {
