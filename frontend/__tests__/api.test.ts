@@ -312,11 +312,10 @@ describe("calculateHouseholdImpact", () => {
     expect(recordedRequests).toHaveLength(3);
   });
 
-  it("waits 30 seconds before retrying after the dashboard API's timeout", async () => {
-    // The dashboard API answers 504 when the Public API takes over 100
-    // seconds. The Public API still finishes and caches the result, so the
-    // retry waits for it to finish instead of starting the same calculation
-    // again at once.
+  it("retries a calculation once, two seconds after a 504", async () => {
+    // The dashboard API waits 750 seconds for the Public API, longer than
+    // this page's five minutes, so a 504 is a brief gateway failure like a
+    // 502 or 503.
     vi.useFakeTimers();
     let calculations = 0;
     const recordedRequests = stubFetch(() => {
@@ -333,10 +332,10 @@ describe("calculateHouseholdImpact", () => {
     });
 
     const impact = api.calculateHouseholdImpact(householdRequest, reform);
-    await vi.advanceTimersByTimeAsync(29_000);
+    await vi.advanceTimersByTimeAsync(1_999);
     expect(recordedRequests).toHaveLength(2);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1);
     await expect(impact).resolves.toMatchObject({ x_axis_max: 400000 });
     expect(recordedRequests).toHaveLength(3);
   });
@@ -374,35 +373,53 @@ describe("calculateHouseholdImpact", () => {
     await Promise.all(impacts);
   });
 
-  it("tries a third time when the dashboard API times out twice", async () => {
-    // A calculation that takes the Public API 130 to 300 seconds outlasts
-    // both 100-second waits; the third request, 30 seconds after the second
-    // 504, reads the result the first computation stored.
+  it("does not count time waiting for the limit toward the five minutes", async () => {
+    // Nine years need 18 calculations; the last three wait a minute for the
+    // 15-a-minute limit, then take the Public API 290 seconds.
     vi.useFakeTimers();
-    let reformCalculations = 0;
-    const recordedRequests = stubFetch((request) => {
-      const isReform = (request.body as { policy?: unknown }).policy !== undefined;
-      if (isReform) {
-        reformCalculations += 1;
-        if (reformCalculations < 3) {
-          return jsonResponse(504, {
-            status: "error",
-            message: "The Public API did not answer in time.",
-            result: null,
+    const years = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035];
+    const forEveryYear = (values: number[]) =>
+      Object.fromEntries(years.map((year) => [String(year), values]));
+    stubFetch(
+      (_request, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const answer = setTimeout(
+            () =>
+              resolve(
+                okAnswer({
+                  people: { you: { employment_income: forEveryYear([0, 100000]) } },
+                  tax_units: {
+                    "your tax unit": {
+                      income_tax: forEveryYear([0, 9000]),
+                      mo_income_tax: forEveryYear([0, 4000]),
+                    },
+                  },
+                  households: {
+                    "your household": {
+                      household_net_income: forEveryYear([0, 90000]),
+                    },
+                  },
+                }),
+              ),
+            290_000,
+          );
+          init.signal?.addEventListener("abort", () => {
+            clearTimeout(answer);
+            reject(init.signal?.reason);
           });
-        }
-      }
-      return okAnswer(
-        calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000]),
-      );
-    });
+        }),
+    );
 
-    const impact = api.calculateHouseholdImpact(householdRequest, reform);
-    await vi.advanceTimersByTimeAsync(60_000);
+    const outcomes = Promise.allSettled(
+      years.map((year) =>
+        api.calculateHouseholdImpact({ ...householdRequest, year }, reform),
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(360_000);
 
-    await expect(impact).resolves.toMatchObject({ x_axis_max: 400000 });
-    // One current-law request and three reform requests.
-    expect(recordedRequests).toHaveLength(4);
+    expect((await outcomes).map((outcome) => outcome.status)).toEqual(
+      years.map(() => "fulfilled"),
+    );
   });
 
   it("shows a gateway failure that keeps happening", async () => {
@@ -422,8 +439,8 @@ describe("calculateHouseholdImpact", () => {
       message: expect.stringMatching(/HTTP 504.*did not answer in time/),
       status: 504,
     });
-    // Two calculations, each tried three times.
-    expect(recordedRequests).toHaveLength(6);
+    // Two calculations, each tried twice.
+    expect(recordedRequests).toHaveLength(4);
   });
 
   it("gives up after five minutes without an answer", async () => {
