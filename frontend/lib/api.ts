@@ -52,18 +52,12 @@ const SHARED_LIMIT_EXPLANATION =
   'limit on calculations a minute';
 
 /**
- * How many times to send a household calculation. A 504 means the
- * dashboard API gave up after 100 seconds while the Public API is still
- * calculating; the Public API stores the result when it finishes (Cloud Run
- * lets it run for 300 seconds), so the page asks again, 30 seconds after
- * each 504, until the stored result can be read or the five minutes are
- * up. A request that arrives while the first computation is still running
- * starts a second one, which is why the waits are not shorter. A 502 or 503
- * is brief and gets one retry after 2 seconds.
+ * A household calculation that fails with a 502, 503 or 504 is sent once
+ * more after 2 seconds. The dashboard API waits 750 seconds for the Public
+ * API's answer, longer than this page's five minutes, so a 504 is a brief
+ * gateway failure like the others, not a slow calculation.
  */
-const ATTEMPTS_AFTER_TIMEOUT = 3;
 const ATTEMPTS_AFTER_GATEWAY_FAILURE = 2;
-const RETRY_WAIT_MILLISECONDS_AFTER_TIMEOUT = 30_000;
 const RETRY_WAIT_MILLISECONDS = 2_000;
 
 /**
@@ -191,11 +185,24 @@ interface CalculatedHousehold {
   tax_units: Record<string, Record<string, ValuesByYear>>;
 }
 
-async function calculateHousehold(
+/**
+ * Sends one household calculation. The five minutes count from when it is
+ * sent, after any wait for the 15-a-minute limit. Fails with the client's
+ * error, so the caller can decide whether to send it again.
+ */
+async function sendHouseholdCalculation(
   household: Record<string, unknown>,
   policy: Record<string, unknown> | undefined,
   signal: AbortSignal | undefined,
 ): Promise<CalculatedHousehold> {
+  if (householdCalculationPauseRemaining() > 0) {
+    throw pausedCalculationFailure();
+  }
+  await householdCalculationLimit.acquire(signal);
+  // The pause may have started while this call waited for the limit.
+  if (householdCalculationPauseRemaining() > 0) {
+    throw pausedCalculationFailure();
+  }
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -209,46 +216,11 @@ async function calculateHousehold(
   } else {
     signal?.addEventListener('abort', onCancel, { once: true });
   }
-  const calculate = async () => {
-    if (householdCalculationPauseRemaining() > 0) {
-      throw pausedCalculationFailure();
-    }
-    await householdCalculationLimit.acquire(controller.signal);
-    // The pause may have started while this call waited for the limit.
-    if (householdCalculationPauseRemaining() > 0) {
-      throw pausedCalculationFailure();
-    }
-    return policyengine.calculateHousehold<CalculatedHousehold>(
+  try {
+    return await policyengine.calculateHousehold<CalculatedHousehold>(
       { country: 'us', household, policy },
       { signal: controller.signal },
     );
-  };
-  try {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        return await calculate();
-      } catch (error) {
-        // Try again after a gateway failure, within the same time limit.
-        if (
-          !(error instanceof PolicyEngineApiError) ||
-          error.status === null ||
-          !RETRYABLE_STATUSES.has(error.status)
-        ) {
-          throw error;
-        }
-        const isTimeout = error.status === 504;
-        const attempts = isTimeout
-          ? ATTEMPTS_AFTER_TIMEOUT
-          : ATTEMPTS_AFTER_GATEWAY_FAILURE;
-        if (attempt >= attempts) {
-          throw error;
-        }
-        await waitFor(
-          isTimeout ? RETRY_WAIT_MILLISECONDS_AFTER_TIMEOUT : RETRY_WAIT_MILLISECONDS,
-          controller.signal,
-        );
-      }
-    }
   } catch (error) {
     if (timedOut) {
       throw new DashboardApiFailure(
@@ -259,19 +231,41 @@ async function calculateHousehold(
     if (signal?.aborted) {
       throw signal.reason;
     }
-    if (error instanceof PolicyEngineApiError) {
-      const failure = failureFor(error, 'calculate this household');
-      if (failure.rateLimited) {
-        // Pause at once, even if the caller has already failed for another
-        // reason and never sees this refusal.
-        pauseHouseholdCalculations();
-      }
-      throw failure;
-    }
     throw error;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onCancel);
+  }
+}
+
+async function calculateHousehold(
+  household: Record<string, unknown>,
+  policy: Record<string, unknown> | undefined,
+  signal: AbortSignal | undefined,
+): Promise<CalculatedHousehold> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await sendHouseholdCalculation(household, policy, signal);
+    } catch (error) {
+      const retryable =
+        error instanceof PolicyEngineApiError &&
+        error.status !== null &&
+        RETRYABLE_STATUSES.has(error.status) &&
+        attempt < ATTEMPTS_AFTER_GATEWAY_FAILURE;
+      if (!retryable) {
+        if (error instanceof PolicyEngineApiError) {
+          const failure = failureFor(error, 'calculate this household');
+          if (failure.rateLimited) {
+            // Pause at once, even if the caller has already failed for
+            // another reason and never sees this refusal.
+            pauseHouseholdCalculations();
+          }
+          throw failure;
+        }
+        throw error;
+      }
+      await waitFor(RETRY_WAIT_MILLISECONDS, signal);
+    }
   }
 }
 
