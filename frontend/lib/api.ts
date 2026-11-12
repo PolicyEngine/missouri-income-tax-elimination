@@ -14,8 +14,10 @@
 
 import {
   createPolicyEngineApiClient,
+  DEFAULT_BASE_URL,
   EconomyComparisonTimeoutError,
   PolicyEngineApiError,
+  RATE_LIMIT_WAIT_MILLISECONDS,
 } from '@policyengine/api-client';
 
 import { createCallLimiter, waitFor } from './callLimiter';
@@ -38,18 +40,22 @@ const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 
 /**
- * How long the page waits after a refusal for the firewall's limit before
- * it calculates households again: the firewall counts calculations a minute.
- */
-export const RATE_LIMIT_PAUSE_MILLISECONDS = 60_000;
-
-/**
  * What the page says about the firewall's limit, which everyone behind one
  * address shares.
  */
-const SHARED_LIMIT_EXPLANATION =
+export const SHARED_LIMIT_EXPLANATION =
   'Everyone on your network, such as a workshop or an office, shares a ' +
   'limit on calculations a minute';
+
+const RATE_LIMIT_REFUSAL_MESSAGE = `${SHARED_LIMIT_EXPLANATION}, and it has been reached.`;
+
+/**
+ * Whether the page is served from the dashboard API's own origin
+ * (www.policyengine.org), where the firewall's 429 is readable.
+ */
+function pageSharesDashboardApiOrigin(): boolean {
+  return globalThis.location?.origin === new URL(DEFAULT_BASE_URL).origin;
+}
 
 /**
  * A household calculation that fails with a 502, 503 or 504 is sent once
@@ -80,7 +86,7 @@ const pauseListeners = new Set<() => void>();
  * (a minute unless given); 0 ends a pause.
  */
 export function pauseHouseholdCalculations(
-  milliseconds: number = RATE_LIMIT_PAUSE_MILLISECONDS,
+  milliseconds: number = RATE_LIMIT_WAIT_MILLISECONDS,
 ): void {
   householdCalculationsPausedUntil = Date.now() + milliseconds;
   pauseListeners.forEach((listener) => listener());
@@ -136,12 +142,7 @@ function dashboardApiMessage(body: unknown): string | null {
  * never sent, so it has no HTTP status.
  */
 function pausedCalculationFailure(): DashboardApiFailure {
-  return new DashboardApiFailure(
-    `${SHARED_LIMIT_EXPLANATION}, and it has been reached. This page can ` +
-      'calculate again in a minute.',
-    null,
-    true,
-  );
+  return new DashboardApiFailure(RATE_LIMIT_REFUSAL_MESSAGE, null, true);
 }
 
 function failureFor(
@@ -149,24 +150,27 @@ function failureFor(
   action: string,
 ): DashboardApiFailure {
   if (error.status === null) {
+    if (pageSharesDashboardApiOrigin()) {
+      // The firewall's 429 would be readable here, so this is a network
+      // failure.
+      return new DashboardApiFailure(
+        "PolicyEngine's calculation service could not be reached. Check " +
+          'your connection and try again.',
+        null,
+      );
+    }
     // On another origin, such as the dashboard's own host, the firewall's
     // 429 has no CORS headers, so the browser reports a network failure.
     // So does the dashboard API's 403 for an origin it does not allow.
     return new DashboardApiFailure(
       "PolicyEngine's calculation service could not be reached. " +
-        `${SHARED_LIMIT_EXPLANATION}: if it has been reached, this page can ` +
-        'calculate again in a minute.',
+        `${SHARED_LIMIT_EXPLANATION}, which may have been reached.`,
       null,
       true,
     );
   }
   if (error.status === 429) {
-    return new DashboardApiFailure(
-      `${SHARED_LIMIT_EXPLANATION}, and it has been reached. This page can ` +
-        'calculate again in a minute.',
-      429,
-      true,
-    );
+    return new DashboardApiFailure(RATE_LIMIT_REFUSAL_MESSAGE, 429, true);
   }
   const detail = dashboardApiMessage(error.body) ?? 'Try again in a few minutes.';
   return new DashboardApiFailure(

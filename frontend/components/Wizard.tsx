@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { SHARED_LIMIT_EXPLANATION } from '@/lib/api';
 import { REFORM_YEARS } from '@/lib/reform';
 
 /**
@@ -626,7 +627,7 @@ export default function Wizard({
       {renderStep()}
 
       <div className="sticky bottom-0 z-20 -mx-3 border-t border-gray-200 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             {clampedStep > 0 && (
               <button
@@ -669,6 +670,12 @@ export default function Wizard({
                   : 'Next'}
             </button>
           </div>
+          {donePaused && (
+            <p role="status" className="basis-full text-right text-sm text-amber-800">
+              {SHARED_LIMIT_EXPLANATION}. This page can calculate again in{' '}
+              {calculationPauseSeconds} s.
+            </p>
+          )}
         </div>
       </div>
     </div>

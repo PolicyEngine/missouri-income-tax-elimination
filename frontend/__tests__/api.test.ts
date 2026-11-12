@@ -561,7 +561,7 @@ describe("pollEconomicImpact", () => {
 
     expect(await failureOf(pollEconomicImpact(98765, 2027))).toMatchObject({
       message: expect.stringMatching(
-        /could not be reached.*shares a limit on calculations a minute.*can calculate again in a minute/i,
+        /could not be reached.*shares a limit on calculations a minute, which may have been reached\.$/i,
       ),
     });
   });
