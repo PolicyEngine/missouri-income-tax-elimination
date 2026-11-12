@@ -186,7 +186,7 @@ describe("calculateHouseholdImpact", () => {
     });
   });
 
-  it("asks the user to wait after the firewall's rate limit", async () => {
+  it("explains the shared limit after the firewall's rate limit", async () => {
     stubFetch(
       () =>
         new Response("Too Many Requests", {
@@ -198,8 +198,11 @@ describe("calculateHouseholdImpact", () => {
     expect(
       await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
     ).toMatchObject({
-      message: expect.stringMatching(/in the last minute.*wait a minute/i),
+      message: expect.stringMatching(
+        /everyone on your network, such as a workshop or an office, shares a limit on calculations a minute.*can calculate again in a minute/i,
+      ),
       status: 429,
+      rateLimited: true,
     });
   });
 
@@ -216,8 +219,11 @@ describe("calculateHouseholdImpact", () => {
     expect(
       await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
     ).toMatchObject({
-      message: expect.stringMatching(/could not be reached.*wait a minute/i),
+      message: expect.stringMatching(
+        /could not be reached.*everyone on your network, such as a workshop or an office, shares a limit on calculations a minute.*can calculate again in a minute/i,
+      ),
       status: null,
+      rateLimited: true,
     });
   });
 
@@ -395,6 +401,7 @@ describe("calculateHouseholdImpact", () => {
     expect(await failure).toMatchObject({
       message: expect.stringMatching(/five minutes/i),
       status: null,
+      rateLimited: false,
     });
   });
 });
@@ -465,7 +472,9 @@ describe("pollEconomicImpact", () => {
     );
 
     expect(await failureOf(pollEconomicImpact(98765, 2027))).toMatchObject({
-      message: expect.stringMatching(/could not be reached.*wait a minute/i),
+      message: expect.stringMatching(
+        /could not be reached.*shares a limit on calculations a minute.*can calculate again in a minute/i,
+      ),
     });
   });
 });
