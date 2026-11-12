@@ -4,6 +4,8 @@ import {
   api,
   createPolicy,
   householdCalculationLimit,
+  householdCalculationPauseRemaining,
+  pauseHouseholdCalculations,
   pollEconomicImpact,
 } from "@/lib/api";
 import { buildHouseholdSituation } from "@/lib/household";
@@ -103,9 +105,52 @@ afterEach(() => {
   vi.useRealTimers();
   // The limit is shared by the page; each test starts with a fresh minute.
   householdCalculationLimit.clear();
+  pauseHouseholdCalculations(0);
 });
 
 describe("calculateHouseholdImpact", () => {
+  it("sends no household calculation while calculations are paused", async () => {
+    const requests = stubFetch(() =>
+      okAnswer(calculatedHousehold([0], [0], [0], [0])),
+    );
+    pauseHouseholdCalculations();
+
+    expect(
+      await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
+    ).toMatchObject({
+      message: expect.stringMatching(/shares a limit on calculations a minute/i),
+      rateLimited: true,
+    });
+    expect(requests).toEqual([]);
+  });
+
+  it("pauses household calculations when either calculation of a year is refused", async () => {
+    // Current law fails at once for another reason; the firewall refuses
+    // the reform a moment later, after the year has already failed.
+    stubFetch(async (request) => {
+      const body = request.body as { policy?: unknown };
+      if (body.policy === undefined) {
+        return jsonResponse(500, {
+          status: "error",
+          message: "Internal error",
+          result: null,
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return new Response("Too Many Requests", {
+        status: 429,
+        headers: { "Content-Type": "text/plain" },
+      });
+    });
+
+    expect(
+      await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
+    ).toMatchObject({ status: 500 });
+    await vi.waitFor(() =>
+      expect(householdCalculationPauseRemaining()).toBeGreaterThan(0),
+    );
+  });
+
   it("sends the baseline and reform households to the dashboard API", async () => {
     const recordedRequests = stubFetch(() =>
       okAnswer(calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000])),

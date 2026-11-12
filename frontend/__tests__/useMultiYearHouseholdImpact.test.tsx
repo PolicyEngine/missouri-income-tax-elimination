@@ -228,4 +228,44 @@ describe('useMultiYearHouseholdImpact', () => {
 
     act(() => root.unmount());
   });
+
+  it('keeps other failures when a refusal arrives with no earlier run', async () => {
+    const { latest, root } = renderHouseholdImpactHook();
+    await act(async () => {
+      void latest.hook!.run(baseRequest, reform);
+    });
+    const firstCalculations = pendingCalculations.splice(0);
+    const serverFailure = new DashboardApiFailure(
+      'PolicyEngine could not calculate this household (HTTP 500): Internal error',
+      500,
+    );
+    await act(async () => {
+      firstCalculations[1].reject(serverFailure);
+    });
+    await act(async () => {
+      firstCalculations[0].reject(rateLimitRefusal());
+    });
+
+    expect(
+      latest.hook!.years.find((year) => year.year === firstCalculations[1].year),
+    ).toEqual({
+      year: firstCalculations[1].year,
+      status: 'error',
+      error: serverFailure.message,
+    });
+
+    act(() => root.unmount());
+  });
+
+  it('stops the run when the page that started it goes away', async () => {
+    const { latest, root } = renderHouseholdImpactHook();
+    await act(async () => {
+      void latest.hook!.run(baseRequest, reform);
+    });
+    const calculations = pendingCalculations.splice(0);
+
+    act(() => root.unmount());
+
+    expect(calculations.every((calculation) => calculation.signal?.aborted === true)).toBe(true);
+  });
 });
