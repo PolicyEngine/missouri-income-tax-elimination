@@ -83,6 +83,22 @@ describe('Wizard', () => {
     );
   });
 
+  it('announces the pause once, not every second of the countdown', () => {
+    renderLastStep({
+      calculationPauseSeconds: 42,
+      householdSkipped: false,
+      onDone: vi.fn(),
+    });
+
+    const liveRegions = Array.from(
+      document.querySelectorAll('[role="status"], [aria-live]'),
+    );
+    expect(liveRegions.map((region) => region.textContent)).toEqual([
+      'Everyone on your network, such as a workshop or an office, shares a ' +
+        'limit on calculations a minute.',
+    ]);
+  });
+
   it('lets "Done" run the statewide comparisons when the household is skipped', () => {
     const onDone = vi.fn();
 

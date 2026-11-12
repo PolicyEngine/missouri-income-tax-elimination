@@ -124,6 +124,48 @@ describe("calculateHouseholdImpact", () => {
     expect(requests).toEqual([]);
   });
 
+  it("holds back a calculation whose wait for the limit ends during a pause", async () => {
+    // Nine years need 18 calculations: 15 start at once, and the other
+    // three wait a minute for the limit. A refusal pauses calculations in
+    // the meantime.
+    vi.useFakeTimers();
+    const years = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035];
+    const recordedRequests = stubFetch(
+      () => new Promise<Response>(() => undefined),
+    );
+    const outcomes = Promise.allSettled(
+      years.map((year) =>
+        api.calculateHouseholdImpact({ ...householdRequest, year }, reform),
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recordedRequests).toHaveLength(15);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    pauseHouseholdCalculations(120_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(recordedRequests).toHaveLength(15);
+    pauseHouseholdCalculations(0);
+    void outcomes;
+  });
+
+  it("says a calculation held back during a pause may have met the limit", async () => {
+    // The pause may have started from a request with no answer, which
+    // only may have met the limit.
+    stubFetch(() => okAnswer(calculatedHousehold([0], [0], [0], [0])));
+    pauseHouseholdCalculations();
+
+    expect(
+      await failureOf(api.calculateHouseholdImpact(householdRequest, reform)),
+    ).toMatchObject({
+      message:
+        "Everyone on your network, such as a workshop or an office, shares " +
+        "a limit on calculations a minute, which may have been reached.",
+      rateLimited: true,
+    });
+  });
+
   it("pauses household calculations when either calculation of a year is refused", async () => {
     // Current law fails at once for another reason; the firewall refuses
     // the reform a moment later, after the year has already failed.
@@ -495,6 +537,24 @@ describe("calculateHouseholdImpact", () => {
 });
 
 describe("createPolicy", () => {
+  it("asks the user to wait a minute when storing the reform is refused", async () => {
+    stubFetch(
+      () =>
+        new Response("Too Many Requests", {
+          status: 429,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
+
+    expect(await failureOf(createPolicy(reform))).toMatchObject({
+      message:
+        "Everyone on your network, such as a workshop or an office, shares " +
+        "a limit on calculations a minute, and it has been reached. Try " +
+        "again in a minute.",
+      status: 429,
+    });
+  });
+
   it("stores the reform through the dashboard API and returns its ID", async () => {
     const recordedRequests = stubFetch(() => jsonResponse(201, { id: 98765 }));
 
@@ -561,7 +621,9 @@ describe("pollEconomicImpact", () => {
 
     expect(await failureOf(pollEconomicImpact(98765, 2027))).toMatchObject({
       message: expect.stringMatching(
-        /could not be reached.*shares a limit on calculations a minute, which may have been reached\.$/i,
+        // No countdown is shown for the statewide results, so the message
+        // says when to try again.
+        /could not be reached.*shares a limit on calculations a minute, which may have been reached\. Try again in a minute\.$/i,
       ),
     });
   });

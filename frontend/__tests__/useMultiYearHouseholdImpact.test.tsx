@@ -268,4 +268,23 @@ describe('useMultiYearHouseholdImpact', () => {
 
     expect(calculations.every((calculation) => calculation.signal?.aborted === true)).toBe(true);
   });
+
+  it('does not restart the pause for a calculation held back during it', async () => {
+    vi.useFakeTimers();
+    const { latest, root } = renderHouseholdImpactHook();
+    await act(async () => {
+      void latest.hook!.run(baseRequest, reform);
+    });
+    // The API module starts the pause when the firewall refuses a
+    // calculation; half a minute later, a calculation it held back fails.
+    pauseHouseholdCalculations();
+    vi.advanceTimersByTime(30_000);
+    await act(async () => {
+      pendingCalculations.splice(0)[0].reject(rateLimitRefusal());
+    });
+
+    expect(householdCalculationPauseRemaining()).toBe(30_000);
+
+    act(() => root.unmount());
+  });
 });
