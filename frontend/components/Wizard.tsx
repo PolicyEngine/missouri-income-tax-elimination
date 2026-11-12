@@ -671,9 +671,11 @@ export default function Wizard({
             </button>
           </div>
           {donePaused && (
-            <p role="status" className="basis-full text-right text-sm text-amber-800">
-              {SHARED_LIMIT_EXPLANATION}. This page can calculate again in{' '}
-              {calculationPauseSeconds} s.
+            <p className="basis-full text-right text-sm text-amber-800">
+              {/* Only the explanation is announced; the countdown changes
+                  every second. */}
+              <span role="status">{SHARED_LIMIT_EXPLANATION}.</span> This page
+              can calculate again in {calculationPauseSeconds} s.
             </p>
           )}
         </div>

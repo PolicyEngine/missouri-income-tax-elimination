@@ -199,8 +199,12 @@ export function useMultiYearHouseholdImpact() {
           if (controller.signal.aborted) return;
           if (isRateLimitRefusal(e)) {
             // Everyone on the network shares the limit: send nothing more
-            // for a minute, and stop this run's other calculations.
-            pauseHouseholdCalculations();
+            // for a minute, and stop this run's other calculations. The API
+            // module has usually started the pause already; a calculation it
+            // held back must not restart the minute.
+            if (householdCalculationPauseRemaining() === 0) {
+              pauseHouseholdCalculations();
+            }
             controller.abort();
             showRefusal(e);
             return;

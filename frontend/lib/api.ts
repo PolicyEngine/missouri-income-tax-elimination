@@ -142,13 +142,26 @@ function dashboardApiMessage(body: unknown): string | null {
  * never sent, so it has no HTTP status.
  */
 function pausedCalculationFailure(): DashboardApiFailure {
-  return new DashboardApiFailure(RATE_LIMIT_REFUSAL_MESSAGE, null, true);
+  // The pause may have started from a request with no answer, which only
+  // may have met the limit.
+  return new DashboardApiFailure(
+    `${SHARED_LIMIT_EXPLANATION}, which may have been reached.`,
+    null,
+    true,
+  );
 }
 
 function failureFor(
   error: PolicyEngineApiError,
   action: string,
+  /**
+   * Whether the page counts down to its next household calculation; the
+   * statewide results have no countdown, so their refusals say when to
+   * try again.
+   */
+  countdownShown = false,
 ): DashboardApiFailure {
+  const whenToTryAgain = countdownShown ? '' : ' Try again in a minute.';
   if (error.status === null) {
     if (pageSharesDashboardApiOrigin()) {
       // The firewall's 429 would be readable here, so this is a network
@@ -164,13 +177,18 @@ function failureFor(
     // So does the dashboard API's 403 for an origin it does not allow.
     return new DashboardApiFailure(
       "PolicyEngine's calculation service could not be reached. " +
-        `${SHARED_LIMIT_EXPLANATION}, which may have been reached.`,
+        `${SHARED_LIMIT_EXPLANATION}, which may have been reached.` +
+        whenToTryAgain,
       null,
       true,
     );
   }
   if (error.status === 429) {
-    return new DashboardApiFailure(RATE_LIMIT_REFUSAL_MESSAGE, 429, true);
+    return new DashboardApiFailure(
+      RATE_LIMIT_REFUSAL_MESSAGE + whenToTryAgain,
+      429,
+      true,
+    );
   }
   const detail = dashboardApiMessage(error.body) ?? 'Try again in a few minutes.';
   return new DashboardApiFailure(
@@ -258,7 +276,7 @@ async function calculateHousehold(
         attempt < ATTEMPTS_AFTER_GATEWAY_FAILURE;
       if (!retryable) {
         if (error instanceof PolicyEngineApiError) {
-          const failure = failureFor(error, 'calculate this household');
+          const failure = failureFor(error, 'calculate this household', true);
           if (failure.rateLimited) {
             // Pause at once, even if the caller has already failed for
             // another reason and never sees this refusal.
