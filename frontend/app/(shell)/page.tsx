@@ -34,7 +34,10 @@ import Wizard, {
   type ReformPath,
 } from '@/components/Wizard';
 import { useEconomyImpact } from '@/hooks/useEconomyImpact';
-import { useMultiYearHouseholdImpact } from '@/hooks/useMultiYearHouseholdImpact';
+import {
+  useHouseholdCalculationPause,
+  useMultiYearHouseholdImpact,
+} from '@/hooks/useMultiYearHouseholdImpact';
 import type { HouseholdRequest } from '@/lib/types';
 import {
   DEFAULT_SELECTED_YEAR,
@@ -214,10 +217,15 @@ function ReformImpactTab() {
   // 9-year household impact orchestration (2027-2035).
   const {
     years: householdYears,
+    shownBaseRequest: householdShownBaseRequest,
+    rateLimitNotice: householdRateLimitNotice,
     run: runHouseholdImpact,
     runYear: runYearHousehold,
     reset: resetHouseholdImpact,
   } = useMultiYearHouseholdImpact();
+  // After a refusal for the firewall's limit, "Done" waits a minute:
+  // everyone on the network shares the limit.
+  const calculationPauseSeconds = useHouseholdCalculationPause();
 
   // One /us/economy poll per year feeds all four statewide tabs —
   // budget data, decile, intra-decile, poverty all come back together.
@@ -258,6 +266,9 @@ function ReformImpactTab() {
   });
 
   const handleDone = () => {
+    if (calculationPauseSeconds > 0) {
+      return;
+    }
     const customRates = configToCustomRates(path, config);
     const baseRequest = buildBaseRequest(household);
     const reform = buildReform('custom', {}, 2027, customRates);
@@ -322,6 +333,7 @@ function ReformImpactTab() {
             onDone={handleDone}
             onSkipHousehold={() => setSkipHousehold(true)}
             householdSkipped={skipHousehold}
+            calculationPauseSeconds={calculationPauseSeconds}
           />
         </div>
 
@@ -351,7 +363,8 @@ function ReformImpactTab() {
           {!skipHousehold && submittedBaseRequest && (
             <ImpactAnalysis
               years={householdYears}
-              baseRequest={submittedBaseRequest}
+              baseRequest={householdShownBaseRequest ?? submittedBaseRequest}
+              rateLimitNotice={householdRateLimitNotice}
               maxEarnings={maxEarnings}
               selectedYear={selectedYear}
               onYearChange={setSelectedYear}

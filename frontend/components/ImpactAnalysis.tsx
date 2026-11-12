@@ -22,6 +22,11 @@ interface Props {
   maxEarnings?: number;
   selectedYear?: number;
   onYearChange?: (year: number) => void;
+  /**
+   * Set when the firewall's limit refused the latest run and `years` holds
+   * the last finished run: why, shown above the results.
+   */
+  rateLimitNotice?: string | null;
 }
 
 const YEAR_LIST = [
@@ -36,6 +41,7 @@ export default function ImpactAnalysis({
   maxEarnings,
   selectedYear: selectedYearProp,
   onYearChange,
+  rateLimitNotice,
 }: Props) {
   const [internalYear, setInternalYear] = useState<number>(MIN_YEAR);
   const selectedYear = selectedYearProp ?? internalYear;
@@ -301,6 +307,17 @@ export default function ImpactAnalysis({
 
   return (
     <div className="space-y-6">
+      {rateLimitNotice && (
+        <div
+          role="status"
+          className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900"
+        >
+          <p>{rateLimitNotice}</p>
+          <p className="mt-1 text-sm">
+            The results below are for the last scenario and household calculated.
+          </p>
+        </div>
+      )}
       <h2 className="text-2xl font-bold text-primary">Impact analysis</h2>
       {navigator}
       {body}

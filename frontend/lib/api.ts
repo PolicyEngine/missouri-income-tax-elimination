@@ -38,6 +38,20 @@ const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 
 /**
+ * How long the page waits after a refusal for the firewall's limit before
+ * it calculates households again: the firewall counts calculations a minute.
+ */
+export const RATE_LIMIT_PAUSE_MILLISECONDS = 60_000;
+
+/**
+ * What the page says about the firewall's limit, which everyone behind one
+ * address shares.
+ */
+const SHARED_LIMIT_EXPLANATION =
+  'Everyone on your network, such as a workshop or an office, shares a ' +
+  'limit on calculations a minute';
+
+/**
  * How many times to send a household calculation. A 504 means the
  * dashboard API gave up after 100 seconds while the Public API is still
  * calculating; the Public API stores the result when it finishes (Cloud Run
@@ -67,6 +81,11 @@ export class DashboardApiFailure extends Error {
     message: string,
     /** The dashboard API's HTTP status, or null when no answer was read. */
     readonly status: number | null,
+    /**
+     * Whether the firewall's limit may have refused it: a 429, or no
+     * readable answer, which is how a page on another origin sees a 429.
+     */
+    readonly rateLimited: boolean = false,
   ) {
     super(message);
   }
@@ -95,17 +114,19 @@ function failureFor(
     // 429 has no CORS headers, so the browser reports a network failure.
     // So does the dashboard API's 403 for an origin it does not allow.
     return new DashboardApiFailure(
-      "PolicyEngine's calculation service could not be reached. If many " +
-        'calculations have been run from your network in the last minute, ' +
-        'wait a minute and try again.',
+      "PolicyEngine's calculation service could not be reached. " +
+        `${SHARED_LIMIT_EXPLANATION}: if it has been reached, this page can ` +
+        'calculate again in a minute.',
       null,
+      true,
     );
   }
   if (error.status === 429) {
     return new DashboardApiFailure(
-      'Too many calculations have been run from your network in the last ' +
-        'minute. Wait a minute and try again.',
+      `${SHARED_LIMIT_EXPLANATION}, and it has been reached. This page can ` +
+        'calculate again in a minute.',
       429,
+      true,
     );
   }
   const detail = dashboardApiMessage(error.body) ?? 'Try again in a few minutes.';
