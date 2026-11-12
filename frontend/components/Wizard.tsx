@@ -261,7 +261,8 @@ export default function Wizard({
   const clampedStep = Math.min(step, steps.length - 1);
   const currentStep = steps[clampedStep];
   const isLastStep = clampedStep >= steps.length - 1;
-  const donePaused = isLastStep && calculationPauseSeconds > 0;
+  // A skipped household sends no household calculation, so it need not wait.
+  const donePaused = isLastStep && calculationPauseSeconds > 0 && !householdSkipped;
   const canAdvance =
     (currentStep?.id === 'path' ? path !== null : true) && !donePaused;
 

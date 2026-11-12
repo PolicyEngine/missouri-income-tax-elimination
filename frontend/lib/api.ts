@@ -73,6 +73,38 @@ const RETRY_WAIT_MILLISECONDS = 2_000;
  */
 export const householdCalculationLimit = createCallLimiter(15, 60_000);
 
+/**
+ * When the page may send household calculations again after a refusal for
+ * the firewall's limit, in `Date.now()` milliseconds. Every household
+ * calculation checks it when it is sent, whichever run asks for it.
+ */
+let householdCalculationsPausedUntil = 0;
+const pauseListeners = new Set<() => void>();
+
+/**
+ * Stops the page from sending household calculations for `milliseconds`
+ * (a minute unless given); 0 ends a pause.
+ */
+export function pauseHouseholdCalculations(
+  milliseconds: number = RATE_LIMIT_PAUSE_MILLISECONDS,
+): void {
+  householdCalculationsPausedUntil = Date.now() + milliseconds;
+  pauseListeners.forEach((listener) => listener());
+}
+
+/** Milliseconds until the page may send household calculations again; 0 when it may now. */
+export function householdCalculationPauseRemaining(): number {
+  return Math.max(0, householdCalculationsPausedUntil - Date.now());
+}
+
+/** Calls `listener` whenever a pause starts or is ended early; returns the unsubscribe. */
+export function onHouseholdCalculationPause(listener: () => void): () => void {
+  pauseListeners.add(listener);
+  return () => {
+    pauseListeners.delete(listener);
+  };
+}
+
 /** A dashboard API request failed; `message` is written for the user. */
 export class DashboardApiFailure extends Error {
   override name = 'DashboardApiFailure';
@@ -105,6 +137,19 @@ function dashboardApiMessage(body: unknown): string | null {
  * Turns a failure of the dashboard API client into a message for the user.
  * `action` completes "PolicyEngine could not …".
  */
+/**
+ * The refusal for a calculation the page holds back during a pause. It was
+ * never sent, so it has no HTTP status.
+ */
+function pausedCalculationFailure(): DashboardApiFailure {
+  return new DashboardApiFailure(
+    `${SHARED_LIMIT_EXPLANATION}, and it has been reached. This page can ` +
+      'calculate again in a minute.',
+    null,
+    true,
+  );
+}
+
 function failureFor(
   error: PolicyEngineApiError,
   action: string,
@@ -165,7 +210,14 @@ async function calculateHousehold(
     signal?.addEventListener('abort', onCancel, { once: true });
   }
   const calculate = async () => {
+    if (householdCalculationPauseRemaining() > 0) {
+      throw pausedCalculationFailure();
+    }
     await householdCalculationLimit.acquire(controller.signal);
+    // The pause may have started while this call waited for the limit.
+    if (householdCalculationPauseRemaining() > 0) {
+      throw pausedCalculationFailure();
+    }
     return policyengine.calculateHousehold<CalculatedHousehold>(
       { country: 'us', household, policy },
       { signal: controller.signal },
@@ -208,7 +260,13 @@ async function calculateHousehold(
       throw signal.reason;
     }
     if (error instanceof PolicyEngineApiError) {
-      throw failureFor(error, 'calculate this household');
+      const failure = failureFor(error, 'calculate this household');
+      if (failure.rateLimited) {
+        // Pause at once, even if the caller has already failed for another
+        // reason and never sees this refusal.
+        pauseHouseholdCalculations();
+      }
+      throw failure;
     }
     throw error;
   } finally {

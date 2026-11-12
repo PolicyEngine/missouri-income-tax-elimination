@@ -35,6 +35,7 @@ import Wizard, {
 } from '@/components/Wizard';
 import { useEconomyImpact } from '@/hooks/useEconomyImpact';
 import {
+  householdCalculationPauseRemaining,
   useHouseholdCalculationPause,
   useMultiYearHouseholdImpact,
 } from '@/hooks/useMultiYearHouseholdImpact';
@@ -206,8 +207,7 @@ function ReformImpactTab() {
     Record<string, number | boolean>
   >>({});
   /** Snapshot of which years were detected as unchanged at the time
-   *  Done was clicked, so axis-change runYear calls keep skipping the
-   *  same years. */
+   *  Done was clicked. */
   const [submittedSkipYears, setSubmittedSkipYears] = useState<
     Set<number> | undefined
   >(undefined);
@@ -220,7 +220,6 @@ function ReformImpactTab() {
     shownBaseRequest: householdShownBaseRequest,
     rateLimitNotice: householdRateLimitNotice,
     run: runHouseholdImpact,
-    runYear: runYearHousehold,
     reset: resetHouseholdImpact,
   } = useMultiYearHouseholdImpact();
   // After a refusal for the firewall's limit, "Done" waits a minute:
@@ -266,7 +265,9 @@ function ReformImpactTab() {
   });
 
   const handleDone = () => {
-    if (calculationPauseSeconds > 0) {
+    // During the pause after a refusal for the firewall's limit, the
+    // household results stay as they are; a skipped household sends none.
+    if (!skipHousehold && householdCalculationPauseRemaining() > 0) {
       return;
     }
     const customRates = configToCustomRates(path, config);

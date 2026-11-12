@@ -314,7 +314,8 @@ export default function ImpactAnalysis({
         >
           <p>{rateLimitNotice}</p>
           <p className="mt-1 text-sm">
-            The results below are for the last scenario and household calculated.
+            The household results below are for the last scenario and household
+            calculated.
           </p>
         </div>
       )}

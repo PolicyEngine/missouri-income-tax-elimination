@@ -36,11 +36,11 @@ function renderLastStep(props: {
     ),
   );
   const lastStepButton = () =>
-    [...container.querySelectorAll('button')].find((button) =>
+    Array.from(container.querySelectorAll('button')).find((button) =>
       /^(Done|Calculate again in \d+ s)$/.test(button.textContent ?? ''),
     );
   for (let step = 0; step < 10 && lastStepButton() === undefined; step += 1) {
-    const nextButton = [...container.querySelectorAll('button')].find(
+    const nextButton = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === 'Next',
     );
     act(() => nextButton!.click());

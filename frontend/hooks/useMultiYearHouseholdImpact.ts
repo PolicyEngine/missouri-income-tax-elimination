@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
   DashboardApiFailure,
-  RATE_LIMIT_PAUSE_MILLISECONDS,
+  householdCalculationPauseRemaining,
+  onHouseholdCalculationPause,
+  pauseHouseholdCalculations,
 } from '@/lib/api';
 import { FETCH_CONCURRENCY, REFORM_YEARS } from '@/lib/constants';
 import type { HouseholdRequest, HouseholdImpactResponse } from '@/lib/types';
@@ -42,28 +44,7 @@ function zeroHouseholdImpact(
   };
 }
 
-/**
- * When the page may calculate households again after a refusal for the
- * firewall's limit, in `Date.now()` milliseconds.
- */
-let householdCalculationsPausedUntil = 0;
-const pauseListeners = new Set<() => void>();
-
-/**
- * Stops the page from starting household calculations for `milliseconds`
- * (a minute unless given); 0 ends a pause.
- */
-export function pauseHouseholdCalculations(
-  milliseconds: number = RATE_LIMIT_PAUSE_MILLISECONDS,
-): void {
-  householdCalculationsPausedUntil = Date.now() + milliseconds;
-  pauseListeners.forEach((listener) => listener());
-}
-
-/** Milliseconds until the page may calculate households again; 0 when it may now. */
-export function householdCalculationPauseRemaining(): number {
-  return Math.max(0, householdCalculationsPausedUntil - Date.now());
-}
+export { householdCalculationPauseRemaining, pauseHouseholdCalculations };
 
 /**
  * Whole seconds until the page may calculate households again, 0 when it
@@ -86,9 +67,9 @@ export function useHouseholdCalculationPause(): number {
       }
     };
     update();
-    pauseListeners.add(update);
+    const unsubscribe = onHouseholdCalculationPause(update);
     return () => {
-      pauseListeners.delete(update);
+      unsubscribe();
       if (countdown !== undefined) {
         clearInterval(countdown);
       }
@@ -143,6 +124,9 @@ export function useMultiYearHouseholdImpact() {
   // firewall's limit.
   const lastFinishedRunRef = useRef<HouseholdRun | null>(null);
 
+  // A run stops when the page that started it goes away.
+  useEffect(() => () => runRef.current?.abort(), []);
+
   /**
    * Starts a run, unless household calculations are paused after a refusal
    * for the firewall's limit; returns whether it started.
@@ -187,11 +171,12 @@ export function useMultiYearHouseholdImpact() {
           setShownBaseRequest(lastRun.baseRequest);
           setRateLimitNotice(refusal.message);
         } else {
+          // Years that failed for other reasons keep their own message.
           setYears(
             resultYears().map((result) =>
-              result.status === 'ok'
-                ? result
-                : { year: result.year, status: 'error', error: refusal.message },
+              result.status === 'computing'
+                ? { year: result.year, status: 'error', error: refusal.message }
+                : result,
             ),
           );
         }
@@ -235,69 +220,6 @@ export function useMultiYearHouseholdImpact() {
     [],
   );
 
-  const runYear = useCallback(
-    async (
-      year: number,
-      baseRequest: Omit<HouseholdRequest, 'year'>,
-      reform: Record<string, Record<string, number | boolean>> = {},
-      unchangedYears?: Set<number>,
-    ) => {
-      if (householdCalculationPauseRemaining() > 0) {
-        return;
-      }
-      // Short-circuit baseline-equal years with a synthetic zero so the
-      // chart can rerender against the new max_earnings without a fetch.
-      if (unchangedYears?.has(year)) {
-        const zero = zeroHouseholdImpact(baseRequest.max_earnings);
-        setYears((prev) =>
-          prev.map((p) =>
-            p.year === year ? { year, status: 'ok', data: zero } : p,
-          ),
-        );
-        return;
-      }
-      // Mark just this year as computing (keep other years as-is).
-      let previousResult: YearHouseholdImpact | undefined;
-      setYears((prev) =>
-        prev.map((p) => {
-          if (p.year !== year) return p;
-          previousResult = p;
-          return { ...p, status: 'computing', error: undefined };
-        }),
-      );
-      try {
-        const data = await api.calculateHouseholdImpact(
-          { ...baseRequest, year },
-          reform,
-        );
-        setYears((prev) =>
-          prev.map((p) =>
-            p.year === year ? { year, status: 'ok', data } : p,
-          ),
-        );
-      } catch (e) {
-        if (isRateLimitRefusal(e)) {
-          // Keep the year's earlier result, and send nothing for a minute.
-          pauseHouseholdCalculations();
-          setRateLimitNotice(e.message);
-          setYears((prev) =>
-            prev.map((p) =>
-              p.year === year && previousResult !== undefined ? previousResult : p,
-            ),
-          );
-          return;
-        }
-        const message = e instanceof Error ? e.message : 'Unknown error';
-        setYears((prev) =>
-          prev.map((p) =>
-            p.year === year ? { year, status: 'error', error: message } : p,
-          ),
-        );
-      }
-    },
-    [],
-  );
-
   const reset = useCallback(() => {
     runRef.current?.abort();
     runRef.current = null;
@@ -312,7 +234,6 @@ export function useMultiYearHouseholdImpact() {
     shownBaseRequest,
     rateLimitNotice,
     run,
-    runYear,
     reset,
   };
 }
