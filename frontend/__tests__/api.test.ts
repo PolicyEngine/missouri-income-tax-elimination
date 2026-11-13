@@ -380,32 +380,134 @@ describe("calculateHouseholdImpact", () => {
     expect(recordedRequests).toHaveLength(3);
   });
 
-  it("retries a calculation once, two seconds after a 504", async () => {
-    // The dashboard API waits 750 seconds for the Public API, longer than
-    // this page's five minutes, so a 504 is a brief gateway failure like a
-    // 502 or 503.
+  it("shows a 504 without sending the calculation again", async () => {
+    // A 504 means the dashboard API has already waited 750 seconds for the
+    // household (the policyengine-api-access skill's errors table).
+    vi.useFakeTimers();
+    const recordedRequests = stubFetch(() =>
+      jsonResponse(504, {
+        status: "error",
+        message: "The Public API did not answer in time.",
+        result: null,
+      }),
+    );
+
+    const failure = failureOf(api.calculateHouseholdImpact(householdRequest, reform));
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(await failure).toMatchObject({
+      message: expect.stringMatching(/HTTP 504.*did not answer in time/),
+      status: 504,
+    });
+    // Two calculations, each sent once.
+    expect(recordedRequests).toHaveLength(2);
+  });
+
+  it("waits for Retry-After before the retry when it asks for more than two seconds", async () => {
     vi.useFakeTimers();
     let calculations = 0;
     const recordedRequests = stubFetch(() => {
       calculations += 1;
       return calculations === 1
-        ? jsonResponse(504, {
-            status: "error",
-            message: "The Public API did not answer in time.",
-            result: null,
-          })
+        ? new Response(
+            JSON.stringify({
+              status: "error",
+              message: "Authentication is unavailable",
+              result: null,
+            }),
+            {
+              status: 503,
+              headers: { "Content-Type": "application/json", "Retry-After": "10" },
+            },
+          )
         : okAnswer(
             calculatedHousehold([0, 100000], [0, 90000], [0, 9000], [0, 4000]),
           );
     });
 
     const impact = api.calculateHouseholdImpact(householdRequest, reform);
-    await vi.advanceTimersByTimeAsync(1_999);
+    await vi.advanceTimersByTimeAsync(9_999);
     expect(recordedRequests).toHaveLength(2);
 
     await vi.advanceTimersByTimeAsync(1);
     await expect(impact).resolves.toMatchObject({ x_axis_max: 400000 });
     expect(recordedRequests).toHaveLength(3);
+  });
+
+  it("shows a gateway failure at once when Retry-After asks for more than a minute", async () => {
+    vi.useFakeTimers();
+    const recordedRequests = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            status: "error",
+            message: "The Public API could not be reached.",
+            result: null,
+          }),
+          {
+            status: 502,
+            headers: { "Content-Type": "application/json", "Retry-After": "120" },
+          },
+        ),
+    );
+
+    const failure = failureOf(api.calculateHouseholdImpact(householdRequest, reform));
+    await vi.advanceTimersByTimeAsync(130_000);
+
+    expect(await failure).toMatchObject({
+      message: expect.stringMatching(/HTTP 502.*could not be reached/),
+      status: 502,
+    });
+    // Two calculations, each sent once.
+    expect(recordedRequests).toHaveLength(2);
+  });
+
+  it("counts a retry toward the 15 household calculations a minute", async () => {
+    // Seven years need 14 calculations. Each fails once with a 502; after
+    // two seconds only one retry fits in the minute, and the other 13 wait
+    // until the first calculations are a minute old.
+    vi.useFakeTimers();
+    const years = [2027, 2028, 2029, 2030, 2031, 2032, 2033];
+    const forEveryYear = (values: number[]) =>
+      Object.fromEntries(years.map((year) => [String(year), values]));
+    let calculations = 0;
+    const recordedRequests = stubFetch(() => {
+      calculations += 1;
+      return calculations <= years.length * 2
+        ? jsonResponse(502, {
+            status: "error",
+            message: "The Public API could not be reached.",
+            result: null,
+          })
+        : okAnswer({
+            people: { you: { employment_income: forEveryYear([0, 100000]) } },
+            tax_units: {
+              "your tax unit": {
+                income_tax: forEveryYear([0, 9000]),
+                mo_income_tax: forEveryYear([0, 4000]),
+              },
+            },
+            households: {
+              "your household": { household_net_income: forEveryYear([0, 90000]) },
+            },
+          });
+    });
+
+    const impacts = years.map((year) =>
+      api.calculateHouseholdImpact({ ...householdRequest, year }, reform),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recordedRequests).toHaveLength(14);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(recordedRequests).toHaveLength(15);
+
+    await vi.advanceTimersByTimeAsync(57_999);
+    expect(recordedRequests).toHaveLength(15);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(recordedRequests).toHaveLength(28);
+    await Promise.all(impacts);
   });
 
   it("sends at most 15 household calculations in any minute", async () => {
@@ -493,9 +595,9 @@ describe("calculateHouseholdImpact", () => {
   it("shows a gateway failure that keeps happening", async () => {
     vi.useFakeTimers();
     const recordedRequests = stubFetch(() =>
-      jsonResponse(504, {
+      jsonResponse(502, {
         status: "error",
-        message: "The Public API did not answer in time.",
+        message: "The Public API could not be reached.",
         result: null,
       }),
     );
@@ -504,8 +606,8 @@ describe("calculateHouseholdImpact", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(await failure).toMatchObject({
-      message: expect.stringMatching(/HTTP 504.*did not answer in time/),
-      status: 504,
+      message: expect.stringMatching(/HTTP 502.*could not be reached/),
+      status: 502,
     });
     // Two calculations, each tried twice.
     expect(recordedRequests).toHaveLength(4);
