@@ -34,7 +34,11 @@ import Wizard, {
   type ReformPath,
 } from '@/components/Wizard';
 import { useEconomyImpact } from '@/hooks/useEconomyImpact';
-import { useMultiYearHouseholdImpact } from '@/hooks/useMultiYearHouseholdImpact';
+import {
+  householdCalculationPauseRemaining,
+  useHouseholdCalculationPause,
+  useMultiYearHouseholdImpact,
+} from '@/hooks/useMultiYearHouseholdImpact';
 import type { HouseholdRequest } from '@/lib/types';
 import {
   DEFAULT_SELECTED_YEAR,
@@ -203,8 +207,7 @@ function ReformImpactTab() {
     Record<string, number | boolean>
   >>({});
   /** Snapshot of which years were detected as unchanged at the time
-   *  Done was clicked, so axis-change runYear calls keep skipping the
-   *  same years. */
+   *  Done was clicked. */
   const [submittedSkipYears, setSubmittedSkipYears] = useState<
     Set<number> | undefined
   >(undefined);
@@ -214,10 +217,14 @@ function ReformImpactTab() {
   // 9-year household impact orchestration (2027-2035).
   const {
     years: householdYears,
+    shownBaseRequest: householdShownBaseRequest,
+    rateLimitNotice: householdRateLimitNotice,
     run: runHouseholdImpact,
-    runYear: runYearHousehold,
     reset: resetHouseholdImpact,
   } = useMultiYearHouseholdImpact();
+  // After a refusal for the firewall's limit, "Done" waits a minute:
+  // everyone on the network shares the limit.
+  const calculationPauseSeconds = useHouseholdCalculationPause();
 
   // One /us/economy poll per year feeds all four statewide tabs —
   // budget data, decile, intra-decile, poverty all come back together.
@@ -258,6 +265,11 @@ function ReformImpactTab() {
   });
 
   const handleDone = () => {
+    // During the pause after a refusal for the firewall's limit, the
+    // household results stay as they are; a skipped household sends none.
+    if (!skipHousehold && householdCalculationPauseRemaining() > 0) {
+      return;
+    }
     const customRates = configToCustomRates(path, config);
     const baseRequest = buildBaseRequest(household);
     const reform = buildReform('custom', {}, 2027, customRates);
@@ -285,6 +297,13 @@ function ReformImpactTab() {
   );
 
   const summary = summarizeScenario(path, config);
+
+  // The household results are on screen, and with them, after a refusal for
+  // the firewall's limit, the notice that they are from the last finished run.
+  const householdImpactShown =
+    triggered && !skipHousehold && submittedBaseRequest !== null;
+  const householdRateLimitNoticeShown =
+    householdImpactShown && householdRateLimitNotice !== null;
 
   return (
     <div className="space-y-6">
@@ -322,6 +341,8 @@ function ReformImpactTab() {
             onDone={handleDone}
             onSkipHousehold={() => setSkipHousehold(true)}
             householdSkipped={skipHousehold}
+            calculationPauseSeconds={calculationPauseSeconds}
+            rateLimitNoticeShown={householdRateLimitNoticeShown}
           />
         </div>
 
@@ -348,10 +369,11 @@ function ReformImpactTab() {
       {triggered && (
         <div className="space-y-6 pt-4">
           {/* Household impact (fast) */}
-          {!skipHousehold && submittedBaseRequest && (
+          {householdImpactShown && (
             <ImpactAnalysis
               years={householdYears}
-              baseRequest={submittedBaseRequest}
+              baseRequest={householdShownBaseRequest ?? submittedBaseRequest}
+              rateLimitNotice={householdRateLimitNotice}
               maxEarnings={maxEarnings}
               selectedYear={selectedYear}
               onYearChange={setSelectedYear}

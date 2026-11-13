@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { createPolicy, pollEconomicImpact } from '@/lib/api';
+import { createPolicy, DashboardApiFailure, pollEconomicImpact } from '@/lib/api';
 import { FETCH_CONCURRENCY, REFORM_YEARS } from '@/lib/constants';
 import type {
   BudgetImpact,
@@ -241,6 +241,22 @@ export function useEconomyImpact() {
             );
           } catch (e) {
             if (controller.signal.aborted) return;
+            if (e instanceof DashboardApiFailure && e.rateLimited) {
+              // The firewall's limit, which everyone on the network shares,
+              // may have refused this read: this run reads no further
+              // year. Every year still being read shows the refusal; years
+              // already read or failed keep their results. A new "Done"
+              // starts a new run, which reads at once.
+              controller.abort();
+              setYears((prev) =>
+                prev.map((p) =>
+                  p.status === 'pending' || p.status === 'computing'
+                    ? { year: p.year, status: 'error', error: e.message }
+                    : p,
+                ),
+              );
+              return;
+            }
             const message = e instanceof Error ? e.message : 'Unknown error';
             setYears((prev) =>
               prev.map((p) =>
@@ -263,7 +279,10 @@ export function useEconomyImpact() {
           );
         }
       } finally {
-        if (!controller.signal.aborted) {
+        // A new run or a reset replaces or clears `abortRef` and manages
+        // `running` itself; a run stopped for the shared limit is still the
+        // current one, so it ends here.
+        if (abortRef.current === controller) {
           setRunning(false);
         }
       }

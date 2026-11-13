@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { SHARED_LIMIT_EXPLANATION } from '@/lib/api';
 import { REFORM_YEARS } from '@/lib/reform';
 
 /**
@@ -73,6 +74,17 @@ interface Props {
   /** Whether the household calc has been skipped — surfaced on the
    * review step. */
   householdSkipped: boolean;
+  /**
+   * Seconds until the page may calculate again after a refusal for the
+   * firewall's limit; "Done" waits until then. 0 when it may now.
+   */
+  calculationPauseSeconds?: number;
+  /**
+   * Whether the household results show the notice that the firewall's limit
+   * refused the latest run. That notice then announces the shared limit, so
+   * the explanation beside "Done" is not a live region.
+   */
+  rateLimitNoticeShown?: boolean;
 }
 
 const STEP_IDS = [
@@ -249,13 +261,18 @@ export default function Wizard({
   onDone,
   onSkipHousehold,
   householdSkipped,
+  calculationPauseSeconds = 0,
+  rateLimitNoticeShown = false,
 }: Props) {
   const [step, setStep] = useState(0);
   const steps = useMemo(() => visibleSteps(path), [path]);
   const clampedStep = Math.min(step, steps.length - 1);
   const currentStep = steps[clampedStep];
   const isLastStep = clampedStep >= steps.length - 1;
-  const canAdvance = currentStep?.id === 'path' ? path !== null : true;
+  // A skipped household sends no household calculation, so it need not wait.
+  const donePaused = isLastStep && calculationPauseSeconds > 0 && !householdSkipped;
+  const canAdvance =
+    (currentStep?.id === 'path' ? path !== null : true) && !donePaused;
 
   const update = <K extends keyof ReformConfig>(key: K, value: ReformConfig[K]) =>
     onConfigChange({ ...config, [key]: value });
@@ -617,7 +634,7 @@ export default function Wizard({
       {renderStep()}
 
       <div className="sticky bottom-0 z-20 -mx-3 border-t border-gray-200 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             {clampedStep > 0 && (
               <button
@@ -653,9 +670,25 @@ export default function Wizard({
                 : 'cursor-not-allowed bg-gray-200 text-gray-400'
             }`}
             >
-              {isLastStep ? 'Done' : 'Next'}
+              {donePaused
+                ? `Calculate again in ${calculationPauseSeconds} s`
+                : isLastStep
+                  ? 'Done'
+                  : 'Next'}
             </button>
           </div>
+          {donePaused && (
+            <p className="basis-full text-right text-sm text-amber-800">
+              {/* Only the explanation is announced, and only when the
+                  household results show no notice that announces it; the
+                  countdown changes every second. */}
+              <span role={rateLimitNoticeShown ? undefined : 'status'}>
+                {SHARED_LIMIT_EXPLANATION}.
+              </span>{' '}
+              This page
+              can calculate again in {calculationPauseSeconds} s.
+            </p>
+          )}
         </div>
       </div>
     </div>
