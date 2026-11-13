@@ -33,8 +33,15 @@ const policyengine = createPolicyEngineApiClient();
 /** PolicyEngine's baseline policy id for current law (US). */
 export const BASELINE_POLICY_ID = 2;
 
-/** How long a household calculation may take before the page gives up on it. */
-const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
+/**
+ * How long a household calculation may take, counted from when it is sent,
+ * before the page gives up on it: 30 seconds more than the dashboard API's
+ * 750-second wait for the Public API's answer (its route runs for at most
+ * 800 seconds), so the dashboard API's own 504 reaches the page. See the
+ * policyengine-api-access skill's errors table.
+ */
+const CALCULATION_TIMEOUT_MILLISECONDS = 780_000;
+const CALCULATION_TIMEOUT_MINUTES = CALCULATION_TIMEOUT_MILLISECONDS / 60_000;
 
 /**
  * What the page says about the firewall's limit, which everyone behind one
@@ -240,7 +247,7 @@ interface CalculatedHousehold {
 }
 
 /**
- * Sends one household calculation. The five minutes count from when it is
+ * Sends one household calculation. The 13 minutes count from when it is
  * sent, after any wait for the 15-a-minute limit. Fails with the client's
  * error, so the caller can decide whether to send it again.
  */
@@ -278,7 +285,8 @@ async function sendHouseholdCalculation(
   } catch (error) {
     if (timedOut) {
       throw new DashboardApiFailure(
-        'The calculation took longer than five minutes. Try again.',
+        `The calculation took longer than ${CALCULATION_TIMEOUT_MINUTES} ` +
+          'minutes. Try again.',
         null,
       );
     }

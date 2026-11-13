@@ -115,6 +115,9 @@ export default function ImpactAnalysis({
           <p className="mt-4 text-gray-600">
             Calculating impact for {selectedYear}...
           </p>
+          <p className="mt-1 text-sm text-gray-500">
+            A first calculation can take a few minutes.
+          </p>
         </div>
       </div>
     );
