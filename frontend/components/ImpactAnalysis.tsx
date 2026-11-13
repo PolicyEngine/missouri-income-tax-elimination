@@ -310,10 +310,14 @@ export default function ImpactAnalysis({
 
   return (
     <div className="space-y-6">
-      {/* Not a live region: the refusal starts the one-minute pause, and the
-          explanation beside the wizard's "Done" button announces it. */}
+      {/* The one live region for the refusal while it is shown, on every
+          wizard step: the page then tells the wizard not to announce the
+          explanation beside "Done". */}
       {rateLimitNotice && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900">
+        <div
+          role="status"
+          className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900"
+        >
           <p>{rateLimitNotice}</p>
           <p className="mt-1 text-sm">
             The household results below are for the last scenario and household

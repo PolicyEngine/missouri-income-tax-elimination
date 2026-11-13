@@ -229,6 +229,15 @@ function failureFor(
       true,
     );
   }
+  if (error.status === 504) {
+    // The dashboard API's own message names the Public API, a service the
+    // reader does not know.
+    return new DashboardApiFailure(
+      "PolicyEngine's calculation service did not answer in time (HTTP 504). " +
+        'Try again in a few minutes.',
+      504,
+    );
+  }
   const detail = dashboardApiMessage(error.body) ?? 'Try again in a few minutes.';
   return new DashboardApiFailure(
     `PolicyEngine could not ${action} (HTTP ${error.status}): ${detail}`,

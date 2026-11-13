@@ -298,6 +298,13 @@ function ReformImpactTab() {
 
   const summary = summarizeScenario(path, config);
 
+  // The household results are on screen, and with them, after a refusal for
+  // the firewall's limit, the notice that they are from the last finished run.
+  const householdImpactShown =
+    triggered && !skipHousehold && submittedBaseRequest !== null;
+  const householdRateLimitNoticeShown =
+    householdImpactShown && householdRateLimitNotice !== null;
+
   return (
     <div className="space-y-6">
       {/* G1 — sticky scenario summary chip row above both columns. */}
@@ -335,6 +342,7 @@ function ReformImpactTab() {
             onSkipHousehold={() => setSkipHousehold(true)}
             householdSkipped={skipHousehold}
             calculationPauseSeconds={calculationPauseSeconds}
+            rateLimitNoticeShown={householdRateLimitNoticeShown}
           />
         </div>
 
@@ -361,7 +369,7 @@ function ReformImpactTab() {
       {triggered && (
         <div className="space-y-6 pt-4">
           {/* Household impact (fast) */}
-          {!skipHousehold && submittedBaseRequest && (
+          {householdImpactShown && (
             <ImpactAnalysis
               years={householdYears}
               baseRequest={householdShownBaseRequest ?? submittedBaseRequest}

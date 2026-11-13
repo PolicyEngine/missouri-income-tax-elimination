@@ -262,6 +262,7 @@ export default function Wizard({
   onSkipHousehold,
   householdSkipped,
   calculationPauseSeconds = 0,
+  rateLimitNoticeShown = false,
 }: Props) {
   const [step, setStep] = useState(0);
   const steps = useMemo(() => visibleSteps(path), [path]);
@@ -678,9 +679,13 @@ export default function Wizard({
           </div>
           {donePaused && (
             <p className="basis-full text-right text-sm text-amber-800">
-              {/* Only the explanation is announced; the countdown changes
-                  every second. */}
-              <span role="status">{SHARED_LIMIT_EXPLANATION}.</span> This page
+              {/* Only the explanation is announced, and only when the
+                  household results show no notice that announces it; the
+                  countdown changes every second. */}
+              <span role={rateLimitNoticeShown ? undefined : 'status'}>
+                {SHARED_LIMIT_EXPLANATION}.
+              </span>{' '}
+              This page
               can calculate again in {calculationPauseSeconds} s.
             </p>
           )}
