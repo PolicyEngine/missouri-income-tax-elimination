@@ -543,9 +543,10 @@ describe("calculateHouseholdImpact", () => {
     await Promise.all(impacts);
   });
 
-  it("does not count time waiting for the limit toward the five minutes", async () => {
-    // Nine years need 18 calculations; the last three wait a minute for the
-    // 15-a-minute limit, then take the Public API 290 seconds.
+  it("does not count time waiting for the limit toward the 13 minutes", async () => {
+    // Nine years need 18 calculations, and each takes the Public API 770
+    // seconds. The last three wait a minute for the 15-a-minute limit, so
+    // they answer 830 seconds after the first calculations were sent.
     vi.useFakeTimers();
     const years = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035];
     const forEveryYear = (values: number[]) =>
@@ -571,7 +572,7 @@ describe("calculateHouseholdImpact", () => {
                   },
                 }),
               ),
-            290_000,
+            770_000,
           );
           init.signal?.addEventListener("abort", () => {
             clearTimeout(answer);
@@ -585,7 +586,7 @@ describe("calculateHouseholdImpact", () => {
         api.calculateHouseholdImpact({ ...householdRequest, year }, reform),
       ),
     );
-    await vi.advanceTimersByTimeAsync(360_000);
+    await vi.advanceTimersByTimeAsync(835_000);
 
     expect((await outcomes).map((outcome) => outcome.status)).toEqual(
       years.map(() => "fulfilled"),
@@ -613,7 +614,9 @@ describe("calculateHouseholdImpact", () => {
     expect(recordedRequests).toHaveLength(4);
   });
 
-  it("gives up after five minutes without an answer", async () => {
+  it("gives up 13 minutes after sending a calculation without an answer", async () => {
+    // 30 seconds more than the dashboard API's 750-second wait for a
+    // household calculation.
     vi.useFakeTimers();
     vi.stubGlobal(
       "fetch",
@@ -627,14 +630,58 @@ describe("calculateHouseholdImpact", () => {
       ),
     );
 
+    let failed = false;
     const failure = failureOf(api.calculateHouseholdImpact(householdRequest, reform));
-    await vi.advanceTimersByTimeAsync(300_000);
+    void failure.then(() => {
+      failed = true;
+    });
+    await vi.advanceTimersByTimeAsync(779_999);
+    expect(failed).toBe(false);
 
+    await vi.advanceTimersByTimeAsync(1);
     expect(await failure).toMatchObject({
-      message: expect.stringMatching(/five minutes/i),
+      message: "The calculation took longer than 13 minutes. Try again.",
       status: null,
       rateLimited: false,
     });
+  });
+
+  it("shows the dashboard API's 504 after its 750-second wait for the household", async () => {
+    // The page waits longer than the dashboard API, so the dashboard API's
+    // own 504 reaches it, and it is not sent again.
+    vi.useFakeTimers();
+    const recordedRequests = stubFetch(
+      (_request, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const answer = setTimeout(
+            () =>
+              resolve(
+                jsonResponse(504, {
+                  status: "error",
+                  message: "The Public API did not answer in time.",
+                  result: null,
+                }),
+              ),
+            750_000,
+          );
+          init.signal?.addEventListener("abort", () => {
+            clearTimeout(answer);
+            reject(init.signal?.reason);
+          });
+        }),
+    );
+
+    const failure = failureOf(api.calculateHouseholdImpact(householdRequest, reform));
+    await vi.advanceTimersByTimeAsync(750_000);
+
+    expect(await failure).toMatchObject({
+      message:
+        "PolicyEngine could not calculate this household (HTTP 504): The " +
+        "Public API did not answer in time.",
+      status: 504,
+      rateLimited: false,
+    });
+    expect(recordedRequests).toHaveLength(2);
   });
 });
 
