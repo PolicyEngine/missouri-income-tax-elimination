@@ -256,9 +256,9 @@ interface CalculatedHousehold {
 }
 
 /**
- * Sends one household calculation. The 13 minutes count from when it is
- * sent, after any wait for the 15-a-minute limit. Fails with the client's
- * error, so the caller can decide whether to send it again.
+ * Sends one household calculation. `CALCULATION_TIMEOUT_MILLISECONDS` counts
+ * from when it is sent, after any wait for the 15-a-minute limit. Fails with
+ * the client's error, so the caller can decide whether to send it again.
  */
 async function sendHouseholdCalculation(
   household: Record<string, unknown>,

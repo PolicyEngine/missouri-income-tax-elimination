@@ -243,9 +243,10 @@ export function useEconomyImpact() {
             if (controller.signal.aborted) return;
             if (e instanceof DashboardApiFailure && e.rateLimited) {
               // The firewall's limit, which everyone on the network shares,
-              // may have refused this read: read no further year this
-              // minute. Every year still being read shows the refusal;
-              // years already read or failed keep their results.
+              // may have refused this read: this run reads no further
+              // year. Every year still being read shows the refusal; years
+              // already read or failed keep their results. A new "Done"
+              // starts a new run, which reads at once.
               controller.abort();
               setYears((prev) =>
                 prev.map((p) =>
