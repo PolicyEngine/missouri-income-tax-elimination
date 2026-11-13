@@ -36,9 +36,6 @@ export const BASELINE_POLICY_ID = 2;
 /** How long a household calculation may take before the page gives up on it. */
 const CALCULATION_TIMEOUT_MILLISECONDS = 300_000;
 
-/** Gateway failures that are worth trying again. */
-const RETRYABLE_STATUSES = new Set([502, 503, 504]);
-
 /**
  * What the page says about the firewall's limit, which everyone behind one
  * address shares.
@@ -58,13 +55,48 @@ function pageSharesDashboardApiOrigin(): boolean {
 }
 
 /**
- * A household calculation that fails with a 502, 503 or 504 is sent once
- * more after 2 seconds. The dashboard API waits 750 seconds for the Public
- * API's answer, longer than this page's five minutes, so a 504 is a brief
- * gateway failure like the others, not a slow calculation.
+ * Household calculation failures that are worth one more try, following
+ * the policyengine-api-access skill's errors table: a 502 from the
+ * dashboard API, or a 503 from the Public API ("Authentication is
+ * unavailable"). A 503 from the dashboard API itself (its settings missing)
+ * fails the same way on that one retry and is then shown. A 504 is not
+ * retried: the dashboard API has already waited 750 seconds for the
+ * household, so the page shows the failure.
  */
-const ATTEMPTS_AFTER_GATEWAY_FAILURE = 2;
+const HOUSEHOLD_RETRYABLE_STATUSES = new Set([502, 503]);
+
+/** Each household calculation is sent at most this many times in all. */
+const MAXIMUM_HOUSEHOLD_ATTEMPTS = 2;
+
+/**
+ * The retry waits 2 seconds, or longer when the failure's Retry-After asks
+ * for longer. A failure that asks for more than a minute is shown instead.
+ */
 const RETRY_WAIT_MILLISECONDS = 2_000;
+const LONGEST_RETRY_WAIT_MILLISECONDS = 60_000;
+
+/**
+ * How long to wait before sending a failed household calculation again, or
+ * null when it is not sent again.
+ */
+function householdRetryWaitMilliseconds(
+  error: unknown,
+  attempt: number,
+): number | null {
+  if (
+    !(error instanceof PolicyEngineApiError) ||
+    error.status === null ||
+    !HOUSEHOLD_RETRYABLE_STATUSES.has(error.status) ||
+    attempt >= MAXIMUM_HOUSEHOLD_ATTEMPTS
+  ) {
+    return null;
+  }
+  const wait = Math.max(
+    RETRY_WAIT_MILLISECONDS,
+    (error.retryAfterSeconds ?? 0) * 1000,
+  );
+  return wait > LONGEST_RETRY_WAIT_MILLISECONDS ? null : wait;
+}
 
 /**
  * Household calculations, retries included, start at most 15 times in any
@@ -134,10 +166,6 @@ function dashboardApiMessage(body: unknown): string | null {
 }
 
 /**
- * Turns a failure of the dashboard API client into a message for the user.
- * `action` completes "PolicyEngine could not …".
- */
-/**
  * The refusal for a calculation the page holds back during a pause. It was
  * never sent, so it has no HTTP status.
  */
@@ -151,6 +179,10 @@ function pausedCalculationFailure(): DashboardApiFailure {
   );
 }
 
+/**
+ * Turns a failure of the dashboard API client into a message for the user.
+ * `action` completes "PolicyEngine could not …".
+ */
 function failureFor(
   error: PolicyEngineApiError,
   action: string,
@@ -269,12 +301,8 @@ async function calculateHousehold(
     try {
       return await sendHouseholdCalculation(household, policy, signal);
     } catch (error) {
-      const retryable =
-        error instanceof PolicyEngineApiError &&
-        error.status !== null &&
-        RETRYABLE_STATUSES.has(error.status) &&
-        attempt < ATTEMPTS_AFTER_GATEWAY_FAILURE;
-      if (!retryable) {
+      const retryWait = householdRetryWaitMilliseconds(error, attempt);
+      if (retryWait === null) {
         if (error instanceof PolicyEngineApiError) {
           const failure = failureFor(error, 'calculate this household', true);
           if (failure.rateLimited) {
@@ -286,7 +314,9 @@ async function calculateHousehold(
         }
         throw error;
       }
-      await waitFor(RETRY_WAIT_MILLISECONDS, signal);
+      // After this wait, the retry also waits for the 15-a-minute limit
+      // and checks the pause, like any calculation.
+      await waitFor(retryWait, signal);
     }
   }
 }
