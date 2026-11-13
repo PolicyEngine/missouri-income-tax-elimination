@@ -396,7 +396,9 @@ describe("calculateHouseholdImpact", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(await failure).toMatchObject({
-      message: expect.stringMatching(/HTTP 504.*did not answer in time/),
+      message:
+        "PolicyEngine's calculation service did not answer in time (HTTP " +
+        "504). Try again in a few minutes.",
       status: 504,
     });
     // Two calculations, each sent once.
@@ -676,8 +678,8 @@ describe("calculateHouseholdImpact", () => {
 
     expect(await failure).toMatchObject({
       message:
-        "PolicyEngine could not calculate this household (HTTP 504): The " +
-        "Public API did not answer in time.",
+        "PolicyEngine's calculation service did not answer in time (HTTP " +
+        "504). Try again in a few minutes.",
       status: 504,
       rateLimited: false,
     });

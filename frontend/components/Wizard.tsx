@@ -79,6 +79,12 @@ interface Props {
    * firewall's limit; "Done" waits until then. 0 when it may now.
    */
   calculationPauseSeconds?: number;
+  /**
+   * Whether the household results show the notice that the firewall's limit
+   * refused the latest run. That notice then announces the shared limit, so
+   * the explanation beside "Done" is not a live region.
+   */
+  rateLimitNoticeShown?: boolean;
 }
 
 const STEP_IDS = [

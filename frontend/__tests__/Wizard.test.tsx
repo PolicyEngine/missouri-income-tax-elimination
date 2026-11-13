@@ -26,6 +26,7 @@ function renderLastStep(props: {
   calculationPauseSeconds: number;
   householdSkipped: boolean;
   onDone: () => void;
+  rateLimitNoticeShown?: boolean;
 }): HTMLButtonElement {
   const container = renderIntoDocument(
     <Wizard
@@ -40,6 +41,7 @@ function renderLastStep(props: {
       onSkipHousehold={() => undefined}
       householdSkipped={props.householdSkipped}
       calculationPauseSeconds={props.calculationPauseSeconds}
+      rateLimitNoticeShown={props.rateLimitNoticeShown}
     />,
   );
   const lastStepButton = () =>
@@ -53,6 +55,66 @@ function renderLastStep(props: {
     act(() => nextButton!.click());
   }
   return lastStepButton() as HTMLButtonElement;
+}
+
+const sharedLimitExplanation =
+  'Everyone on your network, such as a workshop or an office, shares a ' +
+  'limit on calculations a minute';
+
+/**
+ * Renders the household results that stay on screen after a refusal: the
+ * last finished run, with the notice above it.
+ */
+function renderKeptAnswerNotice(): void {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  const lastRunYears: YearHouseholdImpact[] = [2027, 2028].map((year) => ({
+    year,
+    status: 'ok',
+    data: {
+      income_range: [0, 400000],
+      net_income_change: [0, 100],
+      federalTaxChange: [0, 0],
+      stateTaxChange: [0, -100],
+      netIncomeChange: [0, 100],
+      benefit_at_income: {
+        baseline: 50000,
+        reform: 50050,
+        difference: 50,
+        federal_tax_change: 0,
+        state_tax_change: -50,
+        net_income_change: 50,
+      },
+      x_axis_max: 400000,
+    },
+  }));
+  renderIntoDocument(
+    <ImpactAnalysis
+      years={lastRunYears}
+      baseRequest={{
+        age_head: 35,
+        age_spouse: null,
+        dependent_ages: [5],
+        income: 50000,
+        max_earnings: 400000,
+        state_code: 'MO',
+      }}
+      selectedYear={2027}
+      rateLimitNotice={`${sharedLimitExplanation}, and it has been reached.`}
+    />,
+  );
+}
+
+function liveRegionsWithExplanation(): Element[] {
+  return Array.from(document.querySelectorAll('[role="status"], [aria-live]')).filter(
+    (region) => region.textContent?.includes(sharedLimitExplanation),
+  );
 }
 
 afterEach(() => {
@@ -106,71 +168,46 @@ describe('Wizard', () => {
     ]);
   });
 
-  it('announces the shared limit once while the last results stay on screen', () => {
+  it('announces the shared limit once, in the kept-answer notice, on the last step', () => {
     // After a refusal, the last finished run stays on screen with a notice
     // above it, and "Done" waits out the minute with its explanation.
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      },
-    );
-    const lastRunYears: YearHouseholdImpact[] = [2027, 2028].map((year) => ({
-      year,
-      status: 'ok',
-      data: {
-        income_range: [0, 400000],
-        net_income_change: [0, 100],
-        federalTaxChange: [0, 0],
-        stateTaxChange: [0, -100],
-        netIncomeChange: [0, 100],
-        benefit_at_income: {
-          baseline: 50000,
-          reform: 50050,
-          difference: 50,
-          federal_tax_change: 0,
-          state_tax_change: -50,
-          net_income_change: 50,
-        },
-        x_axis_max: 400000,
-      },
-    }));
-    const refusalMessage =
-      'Everyone on your network, such as a workshop or an office, shares a ' +
-      'limit on calculations a minute, and it has been reached.';
     renderLastStep({
       calculationPauseSeconds: 42,
       householdSkipped: false,
       onDone: vi.fn(),
+      rateLimitNoticeShown: true,
     });
-    renderIntoDocument(
-      <ImpactAnalysis
-        years={lastRunYears}
-        baseRequest={{
-          age_head: 35,
-          age_spouse: null,
-          dependent_ages: [5],
-          income: 50000,
-          max_earnings: 400000,
-          state_code: 'MO',
-        }}
-        selectedYear={2027}
-        rateLimitNotice={refusalMessage}
-      />,
-    );
+    renderKeptAnswerNotice();
 
-    expect(document.body.textContent).toContain(refusalMessage);
-    const liveRegionsWithExplanation = Array.from(
-      document.querySelectorAll('[role="status"], [aria-live]'),
-    ).filter((region) =>
-      region.textContent?.includes(
-        'Everyone on your network, such as a workshop or an office, shares a ' +
-          'limit on calculations a minute',
-      ),
+    const liveRegions = liveRegionsWithExplanation();
+    expect(liveRegions).toHaveLength(1);
+    expect(liveRegions[0].textContent).toContain(
+      'The household results below are for the last scenario and household ' +
+        'calculated.',
     );
-    expect(liveRegionsWithExplanation).toHaveLength(1);
+  });
+
+  it('announces the shared limit once, in the kept-answer notice, on an earlier step', () => {
+    // The reader went back a step while the household years calculated, so
+    // the explanation beside "Done" is not on screen.
+    renderLastStep({
+      calculationPauseSeconds: 42,
+      householdSkipped: false,
+      onDone: vi.fn(),
+      rateLimitNoticeShown: true,
+    });
+    const backButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Back',
+    );
+    act(() => backButton!.click());
+    renderKeptAnswerNotice();
+
+    const liveRegions = liveRegionsWithExplanation();
+    expect(liveRegions).toHaveLength(1);
+    expect(liveRegions[0].textContent).toContain(
+      'The household results below are for the last scenario and household ' +
+        'calculated.',
+    );
   });
 
   it('lets "Done" run the statewide comparisons when the household is skipped', () => {
